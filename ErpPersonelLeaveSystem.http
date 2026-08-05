@@ -1,0 +1,6 @@
+@ErpPersonelLeaveSystem_HostAddress = http://localhost:5148
+
+GET {{ErpPersonelLeaveSystem_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
