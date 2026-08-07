@@ -13,7 +13,7 @@ namespace ErpPersonelLeaveSystem.models
         // EF core ilişkisi: izin kaydının ait olduğu Personel nesnesine erişim sağlar
         public int employeeId { get; set; }
         [ForeignKey(nameof(employeeId))]
-        public employee? employee { get; set; }
+        public Employee? employee { get; set; }
 
         //kullanılan izin türü 
         public LeaveType LeaveType { get; set; } //kendimize enum LeaveType diyerek özel bir değişken tipi oluşturmuştuk.
@@ -28,11 +28,11 @@ namespace ErpPersonelLeaveSystem.models
         public string? Note { get; set; }
 
         //izin nedeniyle yapılan kesinti tutarı 
-        [Column(TypeName = "decimal(18,2")]
+        [Column(TypeName = "decimal(18,2)")]
         public decimal CalculatedDeducation { get; set; }
 
         //kesinti sonrası hesaplanan o ayki net maaş
-        [Column(TypeName = "decimal(18,2")]
+        [Column(TypeName = "decimal(18,2)")]
         public decimal FinalSalary { get; set; }
 
     }

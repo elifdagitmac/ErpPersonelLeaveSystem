@@ -7,7 +7,7 @@ using System.Data.Common;
 namespace ErpPersonelLeaveSystem.models
 {
     
-    public class employee
+    public class Employee
     {
         [Key] 
         public int Id { get; set; }
