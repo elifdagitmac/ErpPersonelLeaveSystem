@@ -1,14 +1,12 @@
 ﻿namespace ErpPersonnelLeaveSystem.Controllers;
 
-
 using ErpPersonelLeaveSystem.Data;
 using ErpPersonelLeaveSystem.models;
 using ErpPersonelLeaveSystem.Services;
+
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-// [ApiController]: REST Web API kontrolcüsü olduğunu belirtir.
-// [Route]: API adresinin 'api/personnel' olacağını belirler.
 [ApiController]
 [Route("api/[controller]")]
 public class PersonnelController : ControllerBase
@@ -16,7 +14,6 @@ public class PersonnelController : ControllerBase
     private readonly ErpDbContext _context;
     private readonly ILeaveCalculationService _leaveService;
 
-    // Kurucu Metod (Dependency Injection)
     public PersonnelController(ErpDbContext context, ILeaveCalculationService leaveService)
     {
         _context = context;
@@ -48,10 +45,42 @@ public class PersonnelController : ControllerBase
     {
         _context.employees.Add(employee);
         await _context.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetPersonnelById), new { id = employee.Id }, employee);
+        return Ok(employee);
     }
 
-    // 4. KAPIMIZ: Canlı Maaş & İzin Kesintisi Simülatörü (POST /api/personnel/calculate)
+    // 4. KAPIMIZ: Personel Bilgilerini Güncelle (PUT /api/personnel/5)
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdatePersonnel(int id, [FromBody] Employee updatedEmployee)
+    {
+        var employee = await _context.employees.FindAsync(id);
+        if (employee == null)
+            return NotFound("Güncellenecek personel bulunamadı.");
+
+        employee.Name = updatedEmployee.Name;
+        employee.Department = updatedEmployee.Department;
+        employee.MonthlySalary = updatedEmployee.MonthlySalary;
+        employee.ExperienceYears = updatedEmployee.ExperienceYears;
+        employee.Age = updatedEmployee.Age;
+        employee.WorkStatus = updatedEmployee.WorkStatus;
+
+        await _context.SaveChangesAsync();
+        return Ok(new { Message = "Personel bilgileri ve PDKS çalışma durumu başarıyla güncellendi.", Employee = employee });
+    }
+
+    // 5. KAPIMIZ: Personel Sil (DELETE /api/personnel/5)
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeletePersonnel(int id)
+    {
+        var employee = await _context.employees.FindAsync(id);
+        if (employee == null)
+            return NotFound("Silinecek personel bulunamadı.");
+
+        _context.employees.Remove(employee);
+        await _context.SaveChangesAsync();
+        return Ok(new { Message = "Personel veritabanından başarıyla silindi." });
+    }
+
+    // 6. KAPIMIZ: Canlı Maaş & İzin Kesintisi Simülatörü (POST /api/personnel/calculate)
     [HttpPost("calculate")]
     public IActionResult CalculatePayroll([FromQuery] decimal monthlySalary, [FromQuery] LeaveType leaveType, [FromQuery] int leaveDays)
     {
@@ -59,19 +88,39 @@ public class PersonnelController : ControllerBase
         return Ok(result);
     }
 
-    // 5. KAPIMIZ: İzin Talebini Onayla ve Veritabanına Kaydet (POST /api/personnel/add-leave)
+    // 7. KAPIMIZ: Tüm İzin Geçmişini ve Finansal Detayları Getir (GET /api/personnel/leaves)
+    [HttpGet("leaves")]
+    public async Task<IActionResult> GetAllLeaveRecords()
+    {
+        var leaveRecords = await _context.leaveRecords
+            .Include(l => l.employee)
+            .Select(l => new
+            {
+                l.Id,
+                l.employeeId,
+                EmployeeName = l.employee != null ? l.employee.Name : "Bilinmiyor",
+                BaseSalary = l.employee != null ? l.employee.MonthlySalary : 0m,
+                l.LeaveType,
+                l.LeaveDays,
+                l.Note,
+                DeductionAmount = l.CalculatedDeducation,
+                l.FinalSalary
+            })
+            .ToListAsync();
+
+        return Ok(leaveRecords);
+    }
+
+    // 8. KAPIMIZ: İzin Talebini Onayla ve Veritabanına Kaydet (POST /api/personnel/add-leave)
     [HttpPost("add-leave")]
     public async Task<IActionResult> AddLeaveRecord([FromBody] LeaveRecord leaveRecord)
     {
-        // Senin modelindeki küçük 'employeeId' ye göre personeli buluyoruz
         var employee = await _context.employees.FindAsync(leaveRecord.employeeId);
         if (employee == null)
             return NotFound("İzin verilecek personel bulunamadı.");
 
-        // Maaş kesintisini canlı hesapla
         var calcResult = _leaveService.CalculatePayroll(employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
 
-        // Senin modelindeki 'CalculatedDeducation' ismine birebir eşitliyoruz
         leaveRecord.CalculatedDeducation = calcResult.DeductionAmount;
         leaveRecord.FinalSalary = calcResult.FinalNetSalary;
 

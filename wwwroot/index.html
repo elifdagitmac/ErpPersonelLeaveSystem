@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ErpPersonnel | İzin ve Maaş Takip Sistemi</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <link rel="stylesheet" href="Style.css" />
+</head>
+<body>
+
+    <div class="bg-decor" aria-hidden="true"></div>
+
+    <!-- HEADER & NAV -->
+    <header class="topbar">
+        <div class="topbar-inner">
+            <div class="brand">
+                <span class="brand-icon"><i class="fa-solid fa-layer-group"></i></span>
+                <div>
+                    <h1>ErpPersonnel <span class="brand-divider">|</span> İzin ve Maaş Takip Sistemi</h1>
+                    <p>Personel, PDKS ve bordro verilerini tek panelden yönetin</p>
+                </div>
+            </div>
+
+            <div class="topbar-actions">
+                <button id="themeToggle" class="theme-toggle" type="button" aria-label="Temayı değiştir">
+                    <i class="fa-solid fa-sun theme-icon-sun"></i>
+                    <i class="fa-solid fa-moon theme-icon-moon"></i>
+                </button>
+                <button id="openAddEmployeeModal" class="btn btn-primary" type="button">
+                    <i class="fa-solid fa-user-plus"></i>
+                    Yeni Personel Ekle
+                </button>
+            </div>
+        </div>
+
+        <nav class="tabs">
+            <button class="tab-btn active" data-tab="tab-dashboard">
+                <i class="fa-solid fa-chart-line"></i> Dashboard &amp; Canlı Simülatör
+            </button>
+            <button class="tab-btn" data-tab="tab-explorer">
+                <i class="fa-solid fa-database"></i> Veritabanı Gezgini
+            </button>
+        </nav>
+    </header>
+
+    <main class="content">
+
+        <!-- ============ DASHBOARD & CANLI SİMÜLATÖR ============ -->
+        <section id="tab-dashboard" class="tab-panel active">
+
+            <!-- KPI KARTLARI -->
+            <div class="kpi-grid">
+                <div class="kpi-card glass">
+                    <div class="kpi-icon kpi-icon-blue"><i class="fa-solid fa-users"></i></div>
+                    <div class="kpi-info">
+                        <p class="kpi-label">Toplam Personel</p>
+                        <p class="kpi-value" id="kpiTotalEmployees">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card glass">
+                    <div class="kpi-icon kpi-icon-green"><i class="fa-solid fa-building"></i></div>
+                    <div class="kpi-info">
+                        <p class="kpi-label">Ofistekiler (PDKS)</p>
+                        <p class="kpi-value" id="kpiInOffice">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card glass">
+                    <div class="kpi-icon kpi-icon-yellow"><i class="fa-solid fa-plane-departure"></i></div>
+                    <div class="kpi-info">
+                        <p class="kpi-label">Toplam Onaylı İzin Günü</p>
+                        <p class="kpi-value" id="kpiTotalLeaveDays">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card glass">
+                    <div class="kpi-icon kpi-icon-orange"><i class="fa-solid fa-sack-dollar"></i></div>
+                    <div class="kpi-info">
+                        <p class="kpi-label">Toplam Aylık Brüt Bordro</p>
+                        <p class="kpi-value" id="kpiTotalPayroll">-</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CANLI SİMÜLATÖR -->
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-bolt"></i> Canlı İzin &amp; Maaş Simülatörü</h2>
+            </div>
+
+            <div class="sim-layout">
+                <form id="simForm" class="glass form-card">
+                    <div class="form-grid">
+                        <div class="form-field span-2">
+                            <label for="simEmployee">Personel Seçimi</label>
+                            <select id="simEmployee" required>
+                                <option value="" disabled selected>Personel seçiniz</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="simLeaveType">İzin Türü</label>
+                            <select id="simLeaveType" required>
+                                <option value="1">Yıllık İzin (Ücretli)</option>
+                                <option value="2">Ücretsiz İzin (Kesintili)</option>
+                                <option value="3">Sağlık İzni (Ücretli)</option>
+                                <option value="4">Mazeret İzni (Ücretli)</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="simLeaveDays">İzin Günü</label>
+                            <input id="simLeaveDays" type="number" min="1" max="365" value="1" required />
+                        </div>
+                        <div class="form-field span-2">
+                            <label for="simNote">Açıklama (opsiyonel)</label>
+                            <input id="simNote" type="text" maxlength="250" placeholder="İzin ile ilgili not..." />
+                        </div>
+                    </div>
+
+                    <div id="simStatus" class="status-msg"></div>
+
+                    <div class="form-actions">
+                        <button type="submit" id="calcBtn" class="btn btn-primary">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Hesaplamayı Simüle Et
+                        </button>
+                        <button type="button" id="confirmLeaveBtn" class="btn btn-success" disabled>
+                            <i class="fa-solid fa-check"></i> İzin Talebini Onayla ve Kaydet
+                        </button>
+                    </div>
+                </form>
+
+                <div class="result-card glass" id="resultCard" hidden>
+                    <h3><i class="fa-solid fa-receipt"></i> Hesaplama Sonucu</h3>
+                    <dl class="result-grid">
+                        <dt>Taban Maaş</dt>
+                        <dd id="resBaseSalary">-</dd>
+
+                        <dt>Günlük Yevmiye</dt>
+                        <dd id="resDailyWage">-</dd>
+
+                        <dt>İzin Türü</dt>
+                        <dd id="resLeaveType">-</dd>
+
+                        <dt>İzin Günü</dt>
+                        <dd id="resLeaveDays">-</dd>
+
+                        <dt>Kesinti 🔴</dt>
+                        <dd id="resDeduction" class="highlight-negative">-</dd>
+
+                        <dt>Net Maaş 🟢</dt>
+                        <dd id="resFinalSalary" class="highlight-positive">-</dd>
+                    </dl>
+                    <p id="resFormula" class="formula-text"></p>
+                </div>
+            </div>
+
+            <!-- PERSONEL KADROSU -->
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-id-card-clip"></i> Personel Kadrosu &amp; İşlemler</h2>
+                <div class="panel-actions">
+                    <div class="search-box">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input id="searchInput" type="text" placeholder="Ada veya departmana göre ara..." />
+                    </div>
+                    <button id="refreshListBtn" class="btn btn-secondary" type="button">
+                        <i class="fa-solid fa-rotate"></i> Yenile
+                    </button>
+                </div>
+            </div>
+
+            <div id="listStatus" class="status-msg"></div>
+
+            <div class="table-wrapper glass">
+                <table id="employeeTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Personel Adı</th>
+                            <th>Departman</th>
+                            <th>PDKS Durumu</th>
+                            <th>Aylık Maaş</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employeeTableBody"></tbody>
+                </table>
+                <p id="emptyListMsg" class="empty-msg" hidden>Henüz kayıtlı personel bulunmuyor.</p>
+            </div>
+        </section>
+
+        <!-- ============ VERİTABANI GEZGİNİ ============ -->
+        <section id="tab-explorer" class="tab-panel">
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-clock-rotate-left"></i> Onaylanan İzin Kayıtları</h2>
+                <div class="panel-actions">
+                    <button id="refreshLeavesBtn" class="btn btn-secondary" type="button">
+                        <i class="fa-solid fa-rotate"></i> Yenile
+                    </button>
+                </div>
+            </div>
+
+            <div id="leavesStatus" class="status-msg"></div>
+
+            <div class="table-wrapper glass">
+                <table id="leavesTable">
+                    <thead>
+                        <tr>
+                            <th>Kayıt ID</th>
+                            <th>Personel Adı</th>
+                            <th>İzin Türü</th>
+                            <th>İzin Günü</th>
+                            <th>Kesintisiz Taban Maaş (₺)</th>
+                            <th>İzin Kesintisi (-₺)</th>
+                            <th>Net Ele Geçen Maaş (₺)</th>
+                            <th>Açıklama</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leavesTableBody"></tbody>
+                </table>
+                <p id="emptyLeavesMsg" class="empty-msg" hidden>Henüz onaylanmış bir izin kaydı yok.</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ============ YENİ / DÜZENLE PERSONEL MODAL ============ -->
+    <div id="employeeModal" class="modal-overlay" hidden>
+        <div class="modal glass">
+            <div class="modal-header">
+                <h3 id="employeeModalTitle"><i class="fa-solid fa-user-plus"></i> Yeni Personel Ekle</h3>
+                <button class="modal-close" id="closeEmployeeModal" type="button" aria-label="Kapat">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="employeeForm">
+                <input type="hidden" id="empId" />
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="empName">Ad Soyad</label>
+                        <input id="empName" type="text" required maxlength="100" />
+                    </div>
+                    <div class="form-field">
+                        <label for="empDepartment">Departman</label>
+                        <input id="empDepartment" type="text" required maxlength="100" />
+                    </div>
+                    <div class="form-field">
+                        <label for="empExperience">Deneyim (Yıl)</label>
+                        <input id="empExperience" type="number" min="0" max="60" required />
+                    </div>
+                    <div class="form-field">
+                        <label for="empAge">Yaş</label>
+                        <input id="empAge" type="number" min="18" max="75" required />
+                    </div>
+                    <div class="form-field" id="empEducationField">
+                        <label for="empEducation">Eğitim Seviyesi</label>
+                        <select id="empEducation">
+                            <option value="" disabled selected>Seçiniz</option>
+                            <option value="Lise">Lise</option>
+                            <option value="Ön Lisans">Ön Lisans</option>
+                            <option value="Lisans">Lisans</option>
+                            <option value="Yüksek Lisans">Yüksek Lisans</option>
+                            <option value="Doktora">Doktora</option>
+                        </select>
+                    </div>
+                    <div class="form-field" id="empGenderField">
+                        <label for="empGender">Cinsiyet</label>
+                        <select id="empGender">
+                            <option value="" disabled selected>Seçiniz</option>
+                            <option value="Kadın">Kadın</option>
+                            <option value="Erkek">Erkek</option>
+                            <option value="Belirtmek İstemiyorum">Belirtmek İstemiyorum</option>
+                        </select>
+                    </div>
+                    <div class="form-field">
+                        <label for="empSalary">Aylık Maaş (₺)</label>
+                        <input id="empSalary" type="number" min="0" step="0.01" required />
+                    </div>
+                    <div class="form-field">
+                        <label for="empWorkStatus">PDKS Durumu</label>
+                        <select id="empWorkStatus" required>
+                            <option value="1">🟢 Şirkette / Ofiste</option>
+                            <option value="2">🔵 Remote / Evden</option>
+                            <option value="3">🟡 İzinli</option>
+                            <option value="4">🔴 Giriş Yapılmadı</option>
+                        </select>
+                    </div>
+                </div>
+
+                <p id="empEditNote" class="modal-note" hidden>
+                    <i class="fa-solid fa-circle-info"></i>
+                    Bu personel düzenlenirken yalnızca ad, departman, maaş, deneyim, yaş ve PDKS durumu güncellenir.
+                </p>
+
+                <div id="employeeFormStatus" class="status-msg"></div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelEmployeeModal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary" id="submitEmployeeBtn">
+                        <i class="fa-solid fa-floppy-disk"></i> Kaydet
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>

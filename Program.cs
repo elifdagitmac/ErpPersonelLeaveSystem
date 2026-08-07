@@ -30,6 +30,9 @@ if (app.Environment.IsDevelopment())
 
 }
 
+
+app.UseDefaultFiles(); //index.html yi varsayılan ana sayfa yapar
+app.UseStaticFiles(); //wwwroot klasöründeki web dosyalarını dışarı sunar.
 app.UseHttpsRedirection(); //bir kullanıcı güvenli olmayan bit http adresiyle gelirse onu otoatik olarak güveli https adresine yönlendirir.
 app.UseAuthorization(); //Gelen kullanıcının istediği işlemi yapmaya yetkisi var mı yok mu onu kontrol eder.
 app.MapControllers();//Tarayıcıdan bir adres isteği geldiğinde sistem arka planda bu adresi projedeki doğru controller sınıfına otomatik yönlendirir.

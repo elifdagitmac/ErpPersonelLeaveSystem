@@ -23,7 +23,7 @@ namespace ErpPersonelLeaveSystem.models
         public int ExperienceYears { get; set; }
 
         [StringLength(50)]
-        public string EducationLevek { get; set; } = string.Empty;
+        public string EducationLevel { get; set; } = string.Empty;
 
         public int Age { get; set; }
 
@@ -34,6 +34,9 @@ namespace ErpPersonelLeaveSystem.models
         public decimal MonthlySalary { get; set; }
         /*diğer alanlar varsayılan SQL tipleriyle otomatik eşleşir, 
         sadece decimal tipinin virgülden sonraki hassasiyet kuralını özel olarak tanımlamak için column kullandık*/
+
+        //Çalışma durumu ( ofis, remote, izinli, giriş yapılmadı)
+        public WorkStatusType WorkStatus { get; set; } = WorkStatusType.Ofiste;
 
 
 
