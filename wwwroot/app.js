@@ -19,10 +19,12 @@ const WORK_STATUSES = {
 let employeesCache = [];
 let leavesCache = [];
 let lastCalculatedResult = null;
+let currentUser = null;
 
 /* ---------- Tema (Açık / Koyu) ---------- */
 
 const THEME_STORAGE_KEY = "erp-theme";
+const USER_STORAGE_KEY = "erp-current-user";
 
 function applyTheme(theme) {
     if (theme === "light") {
@@ -103,6 +105,99 @@ async function apiFetch(url, options) {
     }
 }
 
+/* ---------- Kullanıcı Girişi (Auth & RBAC) ---------- */
+
+function initAuth() {
+    const loginForm = document.getElementById("loginForm");
+    const loginModal = document.getElementById("loginModal");
+    const storedUser = localStorage.getItem(USER_STORAGE_KEY);
+
+    if (storedUser) {
+        try {
+            currentUser = JSON.parse(storedUser);
+            if (loginModal) loginModal.style.display = "none";
+            applyUserPermissions();
+        } catch {
+            localStorage.removeItem(USER_STORAGE_KEY);
+        }
+    }
+
+    if (loginForm) {
+        loginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const name = document.getElementById("loginName").value.trim();
+            const empId = Number(document.getElementById("loginEmpId").value);
+
+            const submitBtn = document.getElementById("submitLoginBtn");
+            if (submitBtn) submitBtn.disabled = true;
+            setStatus("loginFormStatus", "Doğrulanıyor...", "loading");
+
+            try {
+                const result = await apiFetch(`${API_BASE}/login`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ Name: name, EmployeeId: empId })
+                });
+
+                currentUser = result.Employee;
+                localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
+
+                showToast(result.Message || `🔑 Hoş geldiniz, ${currentUser.Name}!`, "success");
+                if (loginModal) loginModal.style.display = "none";
+
+                applyUserPermissions();
+                await loadEmployees();
+                await loadLeaves();
+
+            } catch (err) {
+                setStatus("loginFormStatus", err.message, "error");
+                showToast("Giriş Başarısız: " + err.message, "error");
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        });
+    }
+}
+
+function applyUserPermissions() {
+    if (!currentUser) return;
+
+    const isAdmin = currentUser.Role === "Admin";
+
+    // Yönetici olmayan çalışanlar için Yeni Personel Ekle butonunu gizle
+    const addEmpBtn = document.getElementById("openAddEmployeeModal");
+    if (addEmpBtn) addEmpBtn.style.display = isAdmin ? "" : "none";
+
+    // Header alanına kullanıcı profil rozeti ekle
+    let userBadge = document.getElementById("userProfileBadge");
+    const topbarActions = document.querySelector(".topbar-actions");
+
+    if (!userBadge && topbarActions) {
+        userBadge = document.createElement("div");
+        userBadge.id = "userProfileBadge";
+        userBadge.className = "user-badge";
+        topbarActions.insertBefore(userBadge, topbarActions.firstChild);
+    }
+
+    if (userBadge) {
+        userBadge.innerHTML = `
+            <span class="badge ${isAdmin ? 'badge-office' : 'badge-remote'}">
+                <i class="fa-solid ${isAdmin ? 'fa-user-shield' : 'fa-user'}"></i> 
+                ${escapeHtml(currentUser.Name)} (${isAdmin ? 'Yönetici' : 'Çalışan'})
+            </span>
+            <button id="logoutBtn" class="btn btn-sm btn-secondary" title="Çıkış Yap">
+                <i class="fa-solid fa-right-from-bracket"></i>
+            </button>
+        `;
+
+        document.getElementById("logoutBtn")?.addEventListener("click", () => {
+            localStorage.removeItem(USER_STORAGE_KEY);
+            location.reload();
+        });
+    }
+}
+
 /* ---------- Sekme Geçişleri ---------- */
 
 function initTabs() {
@@ -174,6 +269,8 @@ function renderEmployeeTable(employees) {
     }
     if (emptyMsg) emptyMsg.hidden = true;
 
+    const isAdmin = currentUser?.Role === "Admin";
+
     for (const emp of employees) {
         const empId = emp.id !== undefined ? emp.id : emp.Id;
         const empName = emp.name !== undefined ? emp.name : emp.Name;
@@ -182,17 +279,21 @@ function renderEmployeeTable(employees) {
         const statusVal = Number(emp.workStatus !== undefined ? emp.workStatus : emp.WorkStatus);
         const statusInfo = WORK_STATUSES[statusVal] ?? { label: "Bilinmiyor", emoji: "⚪", badge: "" };
 
+        // Çalışanlar başkalarının maaşını göremez, sadece kendi maaşını görür
+        const canViewSalary = isAdmin || String(currentUser?.Id) === String(empId);
+        const displaySalary = canViewSalary ? formatCurrency(empSalary) : "🔒 Gizli";
+
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>#${empId}</td>
             <td><strong>${escapeHtml(empName)}</strong></td>
             <td>${escapeHtml(empDept)}</td>
             <td><span class="badge ${statusInfo.badge}">${statusInfo.emoji} ${escapeHtml(statusInfo.label)}</span></td>
-            <td>${formatCurrency(empSalary)}</td>
+            <td>${displaySalary}</td>
             <td>
                 <div class="row-actions">
-                    <button class="btn-icon" title="Düzenle" data-edit-emp="${empId}"><i class="fa-solid fa-pen"></i></button>
-                    <button class="btn-icon danger" title="Sil" data-delete-emp="${empId}"><i class="fa-solid fa-trash"></i></button>
+                    ${isAdmin ? `<button class="btn-icon" title="Düzenle" data-edit-emp="${empId}"><i class="fa-solid fa-pen"></i></button>` : ''}
+                    ${isAdmin ? `<button class="btn-icon danger" title="Sil" data-delete-emp="${empId}"><i class="fa-solid fa-trash"></i></button>` : ''}
                     <button class="btn-icon" title="İzin Simülasyonu" data-select-emp="${empId}"><i class="fa-solid fa-bolt"></i></button>
                 </div>
             </td>
@@ -548,7 +649,14 @@ function renderLeavesTable(records) {
     }
     if (emptyMsg) emptyMsg.hidden = true;
 
-    for (const r of records) {
+    const isAdmin = currentUser?.Role === "Admin";
+
+    // Çalışanlar izin tablosunda sadece kendi izinlerini görür
+    const visibleRecords = isAdmin
+        ? records
+        : records.filter(r => String(r.employeeId || (r.employee ? r.employee.id : '')) === String(currentUser?.Id));
+
+    for (const r of visibleRecords) {
         const recId = r.id !== undefined ? r.id : r.Id;
         const leaveTypeVal = Number(r.leaveType !== undefined ? r.leaveType : r.LeaveType);
         const typeInfo = LEAVE_TYPES[leaveTypeVal] ?? { label: leaveTypeVal, badge: "" };
@@ -570,9 +678,10 @@ function renderLeavesTable(records) {
             <td class="highlight-positive"><strong>${formatCurrency(finSal)}</strong></td>
             <td>${escapeHtml(noteVal || "-")}</td>
             <td>
+                ${isAdmin ? `
                 <button class="btn btn-sm btn-outline" title="Bildirim Notu Gönder" data-notify-leave="${recId}">
                     <i class="fa-solid fa-bullhorn"></i> Not Gönder
-                </button>
+                </button>` : '<span class="badge badge-office">✓ Onaylandı</span>'}
             </td>
         `;
         tbody.appendChild(tr);
@@ -655,31 +764,4 @@ function initNotificationModal() {
 
             } catch (err) {
                 setStatus("notifFormStatus", "Gönderilemedi: " + err.message, "error");
-                showToast("Gönderilemedi: " + err.message, "error");
-            } finally {
-                if (submitBtn) submitBtn.disabled = false;
-            }
-        });
-    }
-}
-
-/* ---------- Başlangıç ---------- */
-
-document.addEventListener("DOMContentLoaded", () => {
-    initTheme();
-    initTabs();
-    initEmployeeModal();
-    initSimForm();
-    initNotificationModal();
-
-    const refList = document.getElementById("refreshListBtn");
-    const refLeaves = document.getElementById("refreshLeavesBtn");
-    const searchInp = document.getElementById("searchInput");
-
-    if (refList) refList.addEventListener("click", loadEmployees);
-    if (refLeaves) refLeaves.addEventListener("click", loadLeaves);
-    if (searchInp) searchInp.addEventListener("input", filterEmployeeTable);
-
-    loadEmployees();
-    loadLeaves();
-});
+                showToast("Gö
