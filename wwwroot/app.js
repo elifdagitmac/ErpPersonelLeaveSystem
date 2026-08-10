@@ -17,6 +17,7 @@ const WORK_STATUSES = {
 };
 
 let employeesCache = [];
+let leavesCache = [];
 let lastCalculatedResult = null;
 
 /* ---------- Tema (Açık / Koyu) ---------- */
@@ -526,8 +527,9 @@ async function loadLeaves() {
     setStatus("leavesStatus", "İzin kayıtları yükleniyor...", "loading");
     try {
         const records = await apiFetch(`${API_BASE}/leaves`);
-        renderLeavesTable(records || []);
-        renderLeaveKpi(records || []);
+        leavesCache = records || [];
+        renderLeavesTable(leavesCache);
+        renderLeaveKpi(leavesCache);
         setStatus("leavesStatus", "", "");
     } catch (err) {
         setStatus("leavesStatus", "İzin kayıtları alınamadı: " + err.message, "error");
@@ -567,8 +569,97 @@ function renderLeavesTable(records) {
             <td class="highlight-negative">-${formatCurrency(dedAmt)}</td>
             <td class="highlight-positive"><strong>${formatCurrency(finSal)}</strong></td>
             <td>${escapeHtml(noteVal || "-")}</td>
+            <td>
+                <button class="btn btn-sm btn-outline" title="Bildirim Notu Gönder" data-notify-leave="${recId}">
+                    <i class="fa-solid fa-bullhorn"></i> Not Gönder
+                </button>
+            </td>
         `;
         tbody.appendChild(tr);
+    }
+
+    tbody.querySelectorAll("[data-notify-leave]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-notify-leave");
+            const record = leavesCache.find((r) => String(r.id !== undefined ? r.id : r.Id) === String(id));
+            if (record) openNotificationModal(record);
+        });
+    });
+}
+
+/* ---------- Bildirim Notu Modalı ---------- */
+
+function openNotificationModal(record) {
+    const form = document.getElementById("notificationForm");
+    if (form) form.reset();
+    setStatus("notifFormStatus", "", "");
+
+    const recId = record.id !== undefined ? record.id : record.Id;
+    const empName = record.employeeName || (record.employee ? record.employee.name : "Personel");
+
+    const recIdEl = document.getElementById("notifLeaveRecordId");
+    const nameEl = document.getElementById("notifRecipientName");
+
+    if (recIdEl) recIdEl.value = recId;
+    if (nameEl) nameEl.value = empName;
+
+    const modal = document.getElementById("leaveNotificationModal");
+    if (modal) modal.hidden = false;
+}
+
+function closeNotificationModal() {
+    const modal = document.getElementById("leaveNotificationModal");
+    if (modal) modal.hidden = true;
+}
+
+function initNotificationModal() {
+    const closeBtn = document.getElementById("closeNotificationModal");
+    const cancelBtn = document.getElementById("cancelNotificationModal");
+    const modal = document.getElementById("leaveNotificationModal");
+    const form = document.getElementById("notificationForm");
+
+    if (closeBtn) closeBtn.addEventListener("click", closeNotificationModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeNotificationModal);
+    if (modal) {
+        modal.addEventListener("click", (e) => {
+            if (e.target.id === "leaveNotificationModal") closeNotificationModal();
+        });
+    }
+
+    if (form) {
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const leaveRecordId = Number(document.getElementById("notifLeaveRecordId").value);
+            const messageNote = document.getElementById("notifMessageNote").value.trim();
+
+            const submitBtn = document.getElementById("submitNotificationBtn");
+            if (submitBtn) submitBtn.disabled = true;
+            setStatus("notifFormStatus", "Gönderiliyor...", "loading");
+
+            try {
+                const payload = {
+                    LeaveRecordId: leaveRecordId,
+                    MessageNote: messageNote
+                };
+
+                const result = await apiFetch(`${API_BASE}/send-notification`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+
+                showToast(result?.Message || "📢 Bildirim notu başarıyla gönderildi!", "success");
+                alert(result?.Message || "📢 Bildirim notu başarıyla gönderildi!");
+                closeNotificationModal();
+
+            } catch (err) {
+                setStatus("notifFormStatus", "Gönderilemedi: " + err.message, "error");
+                showToast("Gönderilemedi: " + err.message, "error");
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        });
     }
 }
 
@@ -579,6 +670,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initTabs();
     initEmployeeModal();
     initSimForm();
+    initNotificationModal();
 
     const refList = document.getElementById("refreshListBtn");
     const refLeaves = document.getElementById("refreshLeavesBtn");

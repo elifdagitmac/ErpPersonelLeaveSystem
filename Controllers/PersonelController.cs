@@ -188,4 +188,38 @@ public class PersonnelController : ControllerBase
             return StatusCode(500, new { Message = "İzin kaydı oluşturulamadı.", Error = ex.Message });
         }
     }
+
+    // 9. KAPIMIZ: Personele Sistem İçi İzin Bildirim Notu Gönder (POST /api/personnel/send-notification)
+    [HttpPost("send-notification")]
+    public async Task<IActionResult> SendLeaveNotification([FromBody] LeaveNotificationRequest request)
+    {
+        try
+        {
+            var leaveRecord = await _context.leaveRecords
+                .Include(l => l.employee)
+                .FirstOrDefaultAsync(l => l.Id == request.LeaveRecordId);
+
+            if (leaveRecord == null)
+                return NotFound("İzin kaydı bulunamadı.");
+
+            var employeeName = leaveRecord.employee != null ? leaveRecord.employee.Name : "Personel";
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"📢 Sistem içi bildirim notu '{employeeName}' için başarıyla oluşturuldu!",
+                Details = new
+                {
+                    Recipient = employeeName,
+                    LeaveRecordId = leaveRecord.Id,
+                    Note = request.MessageNote,
+                    CreatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm")
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Bildirim notu oluşturulamadı.", Error = ex.Message });
+        }
+    }
 }

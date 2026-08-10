@@ -309,5 +309,46 @@
     <div id="toast" class="toast"></div>
 
     <script src="app.js"></script>
+
+    <!-- ============ İZİN BİLDİRİM NOTU MODAL ============ -->
+    <div id="leaveNotificationModal" class="modal-overlay" hidden>
+        <div class="modal glass">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-bullhorn"></i> Sistem İçi İzin Bildirim Notu Gönder</h3>
+                <button class="modal-close" id="closeNotificationModal" type="button" aria-label="Kapat">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="notificationForm">
+                <input type="hidden" id="notifLeaveRecordId" />
+                <div class="form-grid">
+                    <div class="form-field span-2">
+                        <label>Gönderen</label>
+                        <input type="text" value="İnsan Kaynakları / Yönetim" readonly disabled />
+                    </div>
+                    <div class="form-field span-2">
+                        <label>Alıcı Personel</label>
+                        <input id="notifRecipientName" type="text" readonly disabled />
+                    </div>
+                    <div class="form-field span-2">
+                        <label for="notifMessageNote">Yönetici İzin Bildirim Notu</label>
+                        <textarea id="notifMessageNote" rows="4" required placeholder="Personelin bilmesi gereken not veya detayları buraya yazınız..."></textarea>
+                    </div>
+                </div>
+
+                <div id="notifFormStatus" class="status-msg"></div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelNotificationModal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary" id="submitNotificationBtn">
+                        <i class="fa-solid fa-paper-plane"></i> Notu Gönder
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
 </body>
 </html>
