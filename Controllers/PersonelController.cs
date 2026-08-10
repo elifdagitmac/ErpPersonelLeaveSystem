@@ -189,7 +189,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 9. KAPIMIZ: Personele Sistem İçi İzin Bildirim Notu Gönder (POST /api/personnel/send-notification)
+    //  Personele Sistem İçi İzin Bildirim Notu Gönder (POST /api/personnel/send-notification)
     [HttpPost("send-notification")]
     public async Task<IActionResult> SendLeaveNotification([FromBody] LeaveNotificationRequest request)
     {
@@ -222,4 +222,50 @@ public class PersonnelController : ControllerBase
             return StatusCode(500, new { Message = "Bildirim notu oluşturulamadı.", Error = ex.Message });
         }
     }
+    
+    
+    //  Kurumsal Kullanıcı Girişi (POST /api/personnel/login)
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.Name) || request.EmployeeId <= 0)
+                return BadRequest(new { Message = "Lütfen Ad Soyad ve Kurum ID alanlarını doldurunuz." });
+
+            var employee = await _context.employees
+                .FirstOrDefaultAsync(e => e.Id == request.EmployeeId);
+
+            if (employee == null)
+                return NotFound(new { Message = "Girilen Kurum ID'sine ait personel kaydı bulunamadı." });
+
+            // Ad Soyad eşleşme kontrolü (Büyük/Küçük harf duyarsız)
+            if (!employee.Name.Trim().Equals(request.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                return BadRequest(new { Message = "Ad Soyad ile Kurum ID eşleşmiyor! Lütfen bilgilerinizi kontrol edin." });
+
+            // Rol Tanımlaması: ID 1 veya IT/İK departmanı -> Admin, Diğerleri -> Employee
+            string userRole = (employee.Id == 1 || employee.Department.Equals("IT", StringComparison.OrdinalIgnoreCase) || employee.Department.Equals("İK", StringComparison.OrdinalIgnoreCase))
+                ? "Admin"
+                : "Employee";
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"🔑 Hoş geldiniz, {employee.Name}!",
+                Employee = new
+                {
+                    Id = employee.Id,
+                    Name = employee.Name,
+                    Department = employee.Department,
+                    Role = userRole,
+                    WorkStatus = (int)employee.WorkStatus
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Giriş işlemi başarısız.", Error = ex.Message });
+        }
+    }
+
 }
