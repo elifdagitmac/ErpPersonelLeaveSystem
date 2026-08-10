@@ -3,10 +3,10 @@
 const API_BASE = "/api/personnel";
 
 const LEAVE_TYPES = {
-    1: { label: "Yıllık İzin", badge: "badge-yillik" },
-    2: { label: "Ücretsiz İzin", badge: "badge-ucretsiz" },
-    3: { label: "Sağlık İzni", badge: "badge-saglik" },
-    4: { label: "Mazeret İzni", badge: "badge-mazaret" },
+    1: { label: "Yıllık İzin (Ücretli)", badge: "badge-yillik" },
+    2: { label: "Ücretsiz İzin (Kesintili)", badge: "badge-ucretsiz" },
+    3: { label: "Sağlık İzni (Ücretli)", badge: "badge-saglik" },
+    4: { label: "Mazeret İzni (Ücretli)", badge: "badge-mazaret" },
 };
 
 const WORK_STATUSES = {
@@ -35,18 +35,21 @@ function initTheme() {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
     applyTheme(stored === "light" ? "light" : "dark");
 
-    document.getElementById("themeToggle").addEventListener("click", () => {
-        const isLight = document.documentElement.getAttribute("data-theme") === "light";
-        const next = isLight ? "dark" : "light";
-        applyTheme(next);
-        localStorage.setItem(THEME_STORAGE_KEY, next);
-    });
+    const themeToggleBtn = document.getElementById("themeToggle");
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener("click", () => {
+            const isLight = document.documentElement.getAttribute("data-theme") === "light";
+            const next = isLight ? "dark" : "light";
+            applyTheme(next);
+            localStorage.setItem(THEME_STORAGE_KEY, next);
+        });
+    }
 }
 
 /* ---------- Yardımcı Fonksiyonlar ---------- */
 
 function formatCurrency(value) {
-    const number = Number(value);
+    const number = Number(value || 0);
     return number.toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 }
 
@@ -58,6 +61,10 @@ function escapeHtml(str) {
 
 function showToast(message, type) {
     const toast = document.getElementById("toast");
+    if (!toast) {
+        if (type === "error") alert(message);
+        return;
+    }
     toast.textContent = message;
     toast.className = "toast show" + (type ? " " + type : "");
     clearTimeout(showToast._timer);
@@ -68,25 +75,31 @@ function showToast(message, type) {
 
 function setStatus(elementId, message, type) {
     const el = document.getElementById(elementId);
+    if (!el) return;
     el.textContent = message || "";
     el.className = "status-msg" + (type ? " " + type : "");
 }
 
 async function apiFetch(url, options) {
-    const response = await fetch(url, options);
-    if (!response.ok) {
-        let detail = "";
-        try {
-            const data = await response.json();
-            detail = data?.title || data?.message || data?.Message || JSON.stringify(data);
-        } catch {
-            detail = await response.text();
+    try {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+            let detail = "";
+            try {
+                const data = await response.json();
+                detail = data?.error || data?.message || data?.Message || data?.title || JSON.stringify(data);
+            } catch {
+                detail = await response.text();
+            }
+            throw new Error(detail || `İstek başarısız oldu (HTTP ${response.status}).`);
         }
-        throw new Error(detail || `İstek başarısız oldu (HTTP ${response.status}).`);
+        if (response.status === 204) return null;
+        const text = await response.text();
+        return text ? JSON.parse(text) : null;
+    } catch (err) {
+        console.error("API İletişim Hatası:", err);
+        throw err;
     }
-    if (response.status === 204) return null;
-    const text = await response.text();
-    return text ? JSON.parse(text) : null;
 }
 
 /* ---------- Sekme Geçişleri ---------- */
@@ -99,9 +112,11 @@ function initTabs() {
             document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
 
             btn.classList.add("active");
-            document.getElementById(btn.dataset.tab).classList.add("active");
+            const targetId = btn.dataset.tab;
+            const targetPanel = document.getElementById(targetId);
+            if (targetPanel) targetPanel.classList.add("active");
 
-            if (btn.dataset.tab === "tab-explorer") {
+            if (targetId === "tab-explorer") {
                 loadLeaves();
             }
         });
@@ -112,17 +127,22 @@ function initTabs() {
 
 function renderKpis() {
     const totalEmployees = employeesCache.length;
-    const inOffice = employeesCache.filter((e) => Number(e.workStatus) === 1).length;
-    const totalPayroll = employeesCache.reduce((sum, e) => sum + Number(e.monthlySalary || 0), 0);
+    const inOffice = employeesCache.filter((e) => Number(e.workStatus !== undefined ? e.workStatus : e.WorkStatus) === 1).length;
+    const totalPayroll = employeesCache.reduce((sum, e) => sum + Number(e.monthlySalary !== undefined ? e.monthlySalary : (e.MonthlySalary || 0)), 0);
 
-    document.getElementById("kpiTotalEmployees").textContent = totalEmployees;
-    document.getElementById("kpiInOffice").textContent = inOffice;
-    document.getElementById("kpiTotalPayroll").textContent = formatCurrency(totalPayroll);
+    const elTotal = document.getElementById("kpiTotalEmployees");
+    const elOffice = document.getElementById("kpiInOffice");
+    const elPayroll = document.getElementById("kpiTotalPayroll");
+
+    if (elTotal) elTotal.textContent = totalEmployees;
+    if (elOffice) elOffice.textContent = inOffice;
+    if (elPayroll) elPayroll.textContent = formatCurrency(totalPayroll);
 }
 
 function renderLeaveKpi(leaveRecords) {
-    const totalDays = leaveRecords.reduce((sum, r) => sum + Number(r.leaveDays || 0), 0);
-    document.getElementById("kpiTotalLeaveDays").textContent = totalDays;
+    const totalDays = leaveRecords.reduce((sum, r) => sum + Number(r.leaveDays !== undefined ? r.leaveDays : (r.LeaveDays || 0)), 0);
+    const elLeave = document.getElementById("kpiTotalLeaveDays");
+    if (elLeave) elLeave.textContent = totalDays + " Gün";
 }
 
 /* ---------- Personel Listesi ---------- */
@@ -144,29 +164,35 @@ async function loadEmployees() {
 function renderEmployeeTable(employees) {
     const tbody = document.getElementById("employeeTableBody");
     const emptyMsg = document.getElementById("emptyListMsg");
+    if (!tbody) return;
     tbody.innerHTML = "";
 
     if (!employees.length) {
-        emptyMsg.hidden = false;
+        if (emptyMsg) emptyMsg.hidden = false;
         return;
     }
-    emptyMsg.hidden = true;
+    if (emptyMsg) emptyMsg.hidden = true;
 
     for (const emp of employees) {
-        const statusInfo = WORK_STATUSES[Number(emp.workStatus)] ?? { label: "Bilinmiyor", emoji: "⚪", badge: "" };
+        const empId = emp.id !== undefined ? emp.id : emp.Id;
+        const empName = emp.name !== undefined ? emp.name : emp.Name;
+        const empDept = emp.department !== undefined ? emp.department : emp.Department;
+        const empSalary = Number(emp.monthlySalary !== undefined ? emp.monthlySalary : emp.MonthlySalary);
+        const statusVal = Number(emp.workStatus !== undefined ? emp.workStatus : emp.WorkStatus);
+        const statusInfo = WORK_STATUSES[statusVal] ?? { label: "Bilinmiyor", emoji: "⚪", badge: "" };
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td>${emp.id}</td>
-            <td>${escapeHtml(emp.name)}</td>
-            <td>${escapeHtml(emp.department)}</td>
+            <td>#${empId}</td>
+            <td><strong>${escapeHtml(empName)}</strong></td>
+            <td>${escapeHtml(empDept)}</td>
             <td><span class="badge ${statusInfo.badge}">${statusInfo.emoji} ${escapeHtml(statusInfo.label)}</span></td>
-            <td>${formatCurrency(emp.monthlySalary)}</td>
+            <td>${formatCurrency(empSalary)}</td>
             <td>
                 <div class="row-actions">
-                    <button class="btn-icon" title="Düzenle" data-edit-emp="${emp.id}"><i class="fa-solid fa-pen"></i></button>
-                    <button class="btn-icon danger" title="Sil" data-delete-emp="${emp.id}"><i class="fa-solid fa-trash"></i></button>
-                    <button class="btn-icon" title="İzin Simülasyonu" data-select-emp="${emp.id}"><i class="fa-solid fa-bolt"></i></button>
+                    <button class="btn-icon" title="Düzenle" data-edit-emp="${empId}"><i class="fa-solid fa-pen"></i></button>
+                    <button class="btn-icon danger" title="Sil" data-delete-emp="${empId}"><i class="fa-solid fa-trash"></i></button>
+                    <button class="btn-icon" title="İzin Simülasyonu" data-select-emp="${empId}"><i class="fa-solid fa-bolt"></i></button>
                 </div>
             </td>
         `;
@@ -176,15 +202,18 @@ function renderEmployeeTable(employees) {
     tbody.querySelectorAll("[data-select-emp]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const id = btn.getAttribute("data-select-emp");
-            document.getElementById("simEmployee").value = id;
-            document.getElementById("simEmployee").scrollIntoView({ behavior: "smooth", block: "center" });
+            const simSelect = document.getElementById("simEmployee");
+            if (simSelect) {
+                simSelect.value = id;
+                simSelect.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
         });
     });
 
     tbody.querySelectorAll("[data-edit-emp]").forEach((btn) => {
         btn.addEventListener("click", () => {
             const id = btn.getAttribute("data-edit-emp");
-            const employee = employeesCache.find((e) => String(e.id) === String(id));
+            const employee = employeesCache.find((e) => String(e.id !== undefined ? e.id : e.Id) === String(id));
             if (employee) openEmployeeModal(employee);
         });
     });
@@ -195,22 +224,24 @@ function renderEmployeeTable(employees) {
 }
 
 function filterEmployeeTable() {
-    const term = document.getElementById("searchInput").value.trim().toLowerCase();
+    const searchInp = document.getElementById("searchInput");
+    if (!searchInp) return;
+    const term = searchInp.value.trim().toLowerCase();
     if (!term) {
         renderEmployeeTable(employeesCache);
         return;
     }
     const filtered = employeesCache.filter(
         (e) =>
-            e.name?.toLowerCase().includes(term) ||
-            e.department?.toLowerCase().includes(term)
+            (e.name || e.Name)?.toLowerCase().includes(term) ||
+            (e.department || e.Department)?.toLowerCase().includes(term)
     );
     renderEmployeeTable(filtered);
 }
 
 async function deleteEmployee(id) {
-    const employee = employeesCache.find((e) => String(e.id) === String(id));
-    const name = employee ? employee.name : `#${id}`;
+    const employee = employeesCache.find((e) => String(e.id !== undefined ? e.id : e.Id) === String(id));
+    const name = employee ? (employee.name || employee.Name) : `#${id}`;
     if (!confirm(`"${name}" adlı personeli silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
         return;
     }
@@ -228,112 +259,147 @@ async function deleteEmployee(id) {
 
 function openEmployeeModal(employee) {
     const form = document.getElementById("employeeForm");
-    form.reset();
+    if (form) form.reset();
     setStatus("employeeFormStatus", "", "");
 
     const isEdit = Boolean(employee);
-    document.getElementById("empId").value = isEdit ? employee.id : "";
-    document.getElementById("employeeModalTitle").innerHTML = isEdit
-        ? '<i class="fa-solid fa-pen"></i> Personel Düzenle'
-        : '<i class="fa-solid fa-user-plus"></i> Yeni Personel Ekle';
-    document.getElementById("submitEmployeeBtn").innerHTML = isEdit
-        ? '<i class="fa-solid fa-floppy-disk"></i> Güncelle'
-        : '<i class="fa-solid fa-floppy-disk"></i> Kaydet';
+    const empIdEl = document.getElementById("empId");
+    if (empIdEl) empIdEl.value = isEdit ? (employee.id !== undefined ? employee.id : employee.Id) : "";
 
-    // Backend PUT ucu yalnızca ad, departman, maaş, deneyim, yaş ve PDKS durumunu günceller;
-    // eğitim/cinsiyet bu yüzden düzenleme sırasında salt-okunur bırakılıyor.
-    document.getElementById("empEducationField").style.display = isEdit ? "none" : "";
-    document.getElementById("empGenderField").style.display = isEdit ? "none" : "";
-    document.getElementById("empEducation").required = !isEdit;
-    document.getElementById("empGender").required = !isEdit;
-    document.getElementById("empEditNote").hidden = !isEdit;
-
-    if (isEdit) {
-        document.getElementById("empName").value = employee.name ?? "";
-        document.getElementById("empDepartment").value = employee.department ?? "";
-        document.getElementById("empExperience").value = employee.experienceYears ?? 0;
-        document.getElementById("empAge").value = employee.age ?? "";
-        document.getElementById("empSalary").value = employee.monthlySalary ?? "";
-        document.getElementById("empWorkStatus").value = employee.workStatus ?? 1;
-    } else {
-        document.getElementById("empWorkStatus").value = 1;
+    const titleEl = document.getElementById("employeeModalTitle");
+    if (titleEl) {
+        titleEl.innerHTML = isEdit
+            ? '<i class="fa-solid fa-pen"></i> Personel Düzenle'
+            : '<i class="fa-solid fa-user-plus"></i> Yeni Personel Ekle';
     }
 
-    document.getElementById("employeeModal").hidden = false;
+    const submitBtn = document.getElementById("submitEmployeeBtn");
+    if (submitBtn) {
+        submitBtn.innerHTML = isEdit
+            ? '<i class="fa-solid fa-floppy-disk"></i> Güncelle'
+            : '<i class="fa-solid fa-floppy-disk"></i> Kaydet';
+    }
+
+    const empEduField = document.getElementById("empEducationField");
+    const empGenderField = document.getElementById("empGenderField");
+    const empEdu = document.getElementById("empEducation");
+    const empGender = document.getElementById("empGender");
+    const empEditNote = document.getElementById("empEditNote");
+
+    if (empEduField) empEduField.style.display = isEdit ? "none" : "";
+    if (empGenderField) empGenderField.style.display = isEdit ? "none" : "";
+    if (empEdu) empEdu.required = !isEdit;
+    if (empGender) empGender.required = !isEdit;
+    if (empEditNote) empEditNote.hidden = !isEdit;
+
+    if (isEdit) {
+        document.getElementById("empName").value = employee.name || employee.Name || "";
+        document.getElementById("empDepartment").value = employee.department || employee.Department || "";
+        document.getElementById("empExperience").value = employee.experienceYears !== undefined ? employee.experienceYears : (employee.ExperienceYears || 0);
+        document.getElementById("empAge").value = employee.age !== undefined ? employee.age : (employee.Age || 25);
+        document.getElementById("empSalary").value = employee.monthlySalary !== undefined ? employee.monthlySalary : (employee.MonthlySalary || 0);
+        document.getElementById("empWorkStatus").value = employee.workStatus !== undefined ? employee.workStatus : (employee.WorkStatus || 1);
+    } else {
+        const wsEl = document.getElementById("empWorkStatus");
+        if (wsEl) wsEl.value = 1;
+    }
+
+    const modal = document.getElementById("employeeModal");
+    if (modal) modal.hidden = false;
 }
 
 function closeEmployeeModal() {
-    document.getElementById("employeeModal").hidden = true;
+    const modal = document.getElementById("employeeModal");
+    if (modal) modal.hidden = true;
 }
 
 function initEmployeeModal() {
-    document.getElementById("openAddEmployeeModal").addEventListener("click", () => openEmployeeModal(null));
-    document.getElementById("closeEmployeeModal").addEventListener("click", closeEmployeeModal);
-    document.getElementById("cancelEmployeeModal").addEventListener("click", closeEmployeeModal);
-    document.getElementById("employeeModal").addEventListener("click", (e) => {
-        if (e.target.id === "employeeModal") closeEmployeeModal();
-    });
+    const openBtn = document.getElementById("openAddEmployeeModal");
+    const closeBtn = document.getElementById("closeEmployeeModal");
+    const cancelBtn = document.getElementById("cancelEmployeeModal");
+    const modal = document.getElementById("employeeModal");
+    const form = document.getElementById("employeeForm");
 
-    document.getElementById("employeeForm").addEventListener("submit", async (e) => {
-        e.preventDefault();
+    if (openBtn) openBtn.addEventListener("click", () => openEmployeeModal(null));
+    if (closeBtn) closeBtn.addEventListener("click", closeEmployeeModal);
+    if (cancelBtn) cancelBtn.addEventListener("click", closeEmployeeModal);
+    if (modal) {
+        modal.addEventListener("click", (e) => {
+            if (e.target.id === "employeeModal") closeEmployeeModal();
+        });
+    }
 
-        const id = document.getElementById("empId").value;
-        const isEdit = Boolean(id);
+    if (form) {
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
 
-        const payload = {
-            Name: document.getElementById("empName").value.trim(),
-            Department: document.getElementById("empDepartment").value.trim(),
-            ExperienceYears: Number(document.getElementById("empExperience").value),
-            EducationLevel: isEdit ? "" : document.getElementById("empEducation").value,
-            Age: Number(document.getElementById("empAge").value),
-            Gender: isEdit ? "" : document.getElementById("empGender").value,
-            MonthlySalary: Number(document.getElementById("empSalary").value),
-            WorkStatus: Number(document.getElementById("empWorkStatus").value),
-        };
+            const id = document.getElementById("empId").value;
+            const isEdit = Boolean(id && id !== "0");
 
-        const submitBtn = document.getElementById("submitEmployeeBtn");
-        submitBtn.disabled = true;
-        setStatus("employeeFormStatus", isEdit ? "Güncelleniyor..." : "Kaydediliyor...", "loading");
+            const empEduEl = document.getElementById("empEducation");
+            const empGenderEl = document.getElementById("empGender");
 
-        try {
-            if (isEdit) {
-                await apiFetch(`${API_BASE}/${id}`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                });
-                showToast("Personel bilgileri güncellendi.", "success");
-            } else {
-                await apiFetch(API_BASE, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                });
-                showToast("Personel başarıyla eklendi.", "success");
+            const payload = {
+                Name: document.getElementById("empName").value.trim(),
+                Department: document.getElementById("empDepartment").value.trim(),
+                ExperienceYears: Number(document.getElementById("empExperience").value) || 0,
+                EducationLevel: isEdit ? "Lisans" : (empEduEl && empEduEl.value ? empEduEl.value : "Lisans"),
+                Age: Number(document.getElementById("empAge").value) || 25,
+                Gender: isEdit ? "Belirtilmedi" : (empGenderEl && empGenderEl.value ? empGenderEl.value : "Belirtilmedi"),
+                MonthlySalary: Number(document.getElementById("empSalary").value) || 0,
+                WorkStatus: Number(document.getElementById("empWorkStatus").value) || 1,
+            };
+
+            const submitBtn = document.getElementById("submitEmployeeBtn");
+            if (submitBtn) submitBtn.disabled = true;
+            setStatus("employeeFormStatus", isEdit ? "Güncelleniyor..." : "Kaydediliyor...", "loading");
+
+            try {
+                if (isEdit) {
+                    await apiFetch(`${API_BASE}/${id}`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    showToast("Personel bilgileri güncellendi.", "success");
+                } else {
+                    await apiFetch(API_BASE, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    showToast("Personel başarıyla eklendi.", "success");
+                }
+
+                closeEmployeeModal();
+                await loadEmployees();
+            } catch (err) {
+                setStatus("employeeFormStatus", "İşlem başarısız: " + err.message, "error");
+                showToast("İşlem başarısız oldu: " + err.message, "error");
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
             }
-
-            closeEmployeeModal();
-            await loadEmployees();
-        } catch (err) {
-            setStatus("employeeFormStatus", "İşlem başarısız: " + err.message, "error");
-            showToast("İşlem başarısız oldu.", "error");
-        } finally {
-            submitBtn.disabled = false;
-        }
-    });
+        });
+    }
 }
 
 /* ---------- İzin & Maaş Simülatörü ---------- */
 
 function populateSimEmployeeSelect(employees) {
     const select = document.getElementById("simEmployee");
+    if (!select) return;
     const currentValue = select.value;
     select.innerHTML = '<option value="" disabled selected>Personel seçiniz</option>';
 
     for (const emp of employees) {
+        const empId = emp.id !== undefined ? emp.id : emp.Id;
+        const empName = emp.name !== undefined ? emp.name : emp.Name;
+        const empDept = emp.department !== undefined ? emp.department : emp.Department;
+        const empSalary = Number(emp.monthlySalary !== undefined ? emp.monthlySalary : (emp.MonthlySalary || 0));
+
         const opt = document.createElement("option");
-        opt.value = emp.id;
-        opt.textContent = `${emp.name} — ${emp.department} (${formatCurrency(emp.monthlySalary)})`;
+        opt.value = empId;
+        opt.textContent = `${empName} — ${empDept} (${formatCurrency(empSalary)})`;
         select.appendChild(opt);
     }
 
@@ -344,100 +410,114 @@ function initSimForm() {
     const form = document.getElementById("simForm");
     const confirmBtn = document.getElementById("confirmLeaveBtn");
 
-    form.addEventListener("submit", async (e) => {
-        e.preventDefault();
+    if (form) {
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
 
-        const employeeId = document.getElementById("simEmployee").value;
-        const leaveType = Number(document.getElementById("simLeaveType").value);
-        const leaveDays = Number(document.getElementById("simLeaveDays").value);
+            const employeeId = document.getElementById("simEmployee").value;
+            const leaveType = Number(document.getElementById("simLeaveType").value);
+            const leaveDays = Number(document.getElementById("simLeaveDays").value);
 
-        if (!employeeId) {
-            setStatus("simStatus", "Lütfen bir personel seçin.", "error");
-            return;
-        }
+            if (!employeeId) {
+                setStatus("simStatus", "Lütfen bir personel seçin.", "error");
+                return;
+            }
 
-        const employee = employeesCache.find((e) => String(e.id) === String(employeeId));
-        if (!employee) {
-            setStatus("simStatus", "Seçilen personel bulunamadı, listeyi yenileyin.", "error");
-            return;
-        }
+            const employee = employeesCache.find((e) => String(e.id !== undefined ? e.id : e.Id) === String(employeeId));
+            if (!employee) {
+                setStatus("simStatus", "Seçilen personel bulunamadı, listeyi yenileyin.", "error");
+                return;
+            }
 
-        setStatus("simStatus", "Hesaplanıyor...", "loading");
-        confirmBtn.disabled = true;
+            const salaryVal = Number(employee.monthlySalary !== undefined ? employee.monthlySalary : (employee.MonthlySalary || 0));
 
-        try {
-            const query = new URLSearchParams({
-                monthlySalary: employee.monthlySalary,
-                leaveType: leaveType,
-                leaveDays: leaveDays,
-            });
+            setStatus("simStatus", "Hesaplanıyor...", "loading");
 
-            const result = await apiFetch(`${API_BASE}/calculate?${query.toString()}`, {
-                method: "POST",
-            });
+            try {
+                const query = new URLSearchParams({
+                    monthlySalary: salaryVal,
+                    leaveType: leaveType,
+                    leaveDays: leaveDays,
+                });
 
-            lastCalculatedResult = { ...result, employeeId, leaveType, leaveDays };
-            renderResult(result, leaveType, leaveDays);
-            setStatus("simStatus", "", "");
-            confirmBtn.disabled = false;
-        } catch (err) {
-            setStatus("simStatus", "Hesaplama başarısız: " + err.message, "error");
-            document.getElementById("resultCard").hidden = true;
-        }
-    });
+                const result = await apiFetch(`${API_BASE}/calculate?${query.toString()}`, {
+                    method: "POST",
+                });
 
-    confirmBtn.addEventListener("click", async () => {
-        if (!lastCalculatedResult) return;
+                lastCalculatedResult = { ...result, employeeId, leaveType, leaveDays };
+                renderResult(result, leaveType, leaveDays);
+                setStatus("simStatus", "", "");
+                if (confirmBtn) confirmBtn.disabled = false;
+            } catch (err) {
+                setStatus("simStatus", "Hesaplama başarısız: " + err.message, "error");
+                const resCard = document.getElementById("resultCard");
+                if (resCard) resCard.hidden = true;
+            }
+        });
+    }
 
-        const employeeId = document.getElementById("simEmployee").value;
-        const leaveType = Number(document.getElementById("simLeaveType").value);
-        const leaveDays = Number(document.getElementById("simLeaveDays").value);
-        const note = document.getElementById("simNote").value.trim();
+    if (confirmBtn) {
+        confirmBtn.addEventListener("click", async () => {
+            if (!lastCalculatedResult) return;
 
-        confirmBtn.disabled = true;
-        setStatus("simStatus", "İzin kaydı oluşturuluyor...", "loading");
+            const employeeId = document.getElementById("simEmployee").value || lastCalculatedResult.employeeId;
+            const leaveType = Number(document.getElementById("simLeaveType").value || lastCalculatedResult.leaveType);
+            const leaveDays = Number(document.getElementById("simLeaveDays").value || lastCalculatedResult.leaveDays);
+            const noteEl = document.getElementById("simNote");
+            const note = noteEl ? noteEl.value.trim() : "";
 
-        try {
-            const payload = {
-                employeeId: Number(employeeId),
-                LeaveType: leaveType,
-                LeaveDays: leaveDays,
-                Note: note || null,
-            };
+            confirmBtn.disabled = true;
+            setStatus("simStatus", "İzin kaydı oluşturuluyor...", "loading");
 
-            await apiFetch(`${API_BASE}/add-leave`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
+            try {
+                const payload = {
+                    employeeId: Number(employeeId),
+                    LeaveType: leaveType,
+                    LeaveDays: leaveDays,
+                    Note: note || null,
+                };
 
-            setStatus("simStatus", "İzin kaydı başarıyla oluşturuldu.", "success");
-            showToast("İzin kaydı başarıyla oluşturuldu.", "success");
+                await apiFetch(`${API_BASE}/add-leave`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
 
-            document.getElementById("simNote").value = "";
-            document.getElementById("resultCard").hidden = true;
-            lastCalculatedResult = null;
+                setStatus("simStatus", "İzin kaydı başarıyla oluşturuldu.", "success");
+                showToast("İzin kaydı başarıyla oluşturuldu.", "success");
 
-            await loadLeaves();
-        } catch (err) {
-            setStatus("simStatus", "İzin kaydı oluşturulamadı: " + err.message, "error");
-            showToast("İzin kaydı oluşturulamadı.", "error");
-            confirmBtn.disabled = false;
-        }
-    });
+                if (noteEl) noteEl.value = "";
+                const resCard = document.getElementById("resultCard");
+                if (resCard) resCard.hidden = true;
+                lastCalculatedResult = null;
+
+                await loadLeaves();
+            } catch (err) {
+                setStatus("simStatus", "İzin kaydı oluşturulamadı: " + err.message, "error");
+                showToast("İzin kaydı oluşturulamadı: " + err.message, "error");
+            } finally {
+                confirmBtn.disabled = false;
+            }
+        });
+    }
 }
 
 function renderResult(result, leaveType, leaveDays) {
     const card = document.getElementById("resultCard");
-    card.hidden = false;
+    if (card) card.hidden = false;
 
-    document.getElementById("resBaseSalary").textContent = formatCurrency(result.baseMonthlySalary);
-    document.getElementById("resDailyWage").textContent = formatCurrency(result.dailyWage);
-    document.getElementById("resLeaveType").textContent = LEAVE_TYPES[leaveType]?.label ?? leaveType;
-    document.getElementById("resLeaveDays").textContent = leaveDays;
-    document.getElementById("resDeduction").textContent = formatCurrency(result.deductionAmount);
-    document.getElementById("resFinalSalary").textContent = formatCurrency(result.finalNetSalary);
-    document.getElementById("resFormula").textContent = result.formulaApplied || "";
+    const setTxt = (id, txt) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = txt;
+    };
+
+    setTxt("resBaseSalary", formatCurrency(result.baseMonthlySalary));
+    setTxt("resDailyWage", formatCurrency(result.dailyWage));
+    setTxt("resLeaveType", LEAVE_TYPES[leaveType]?.label ?? leaveType);
+    setTxt("resLeaveDays", leaveDays + " Gün");
+    setTxt("resDeduction", "-" + formatCurrency(result.deductionAmount));
+    setTxt("resFinalSalary", formatCurrency(result.finalNetSalary));
+    setTxt("resFormula", result.formulaApplied || "");
 }
 
 /* ---------- Veritabanı Gezgini (İzin Geçmişi) ---------- */
@@ -457,27 +537,36 @@ async function loadLeaves() {
 function renderLeavesTable(records) {
     const tbody = document.getElementById("leavesTableBody");
     const emptyMsg = document.getElementById("emptyLeavesMsg");
+    if (!tbody) return;
     tbody.innerHTML = "";
 
     if (!records.length) {
-        emptyMsg.hidden = false;
+        if (emptyMsg) emptyMsg.hidden = false;
         return;
     }
-    emptyMsg.hidden = true;
+    if (emptyMsg) emptyMsg.hidden = true;
 
     for (const r of records) {
-        const typeInfo = LEAVE_TYPES[Number(r.leaveType)] ?? { label: r.leaveType, badge: "" };
+        const recId = r.id !== undefined ? r.id : r.Id;
+        const leaveTypeVal = Number(r.leaveType !== undefined ? r.leaveType : r.LeaveType);
+        const typeInfo = LEAVE_TYPES[leaveTypeVal] ?? { label: leaveTypeVal, badge: "" };
+        const empName = r.employeeName || (r.employee ? r.employee.name : "Bilinmiyor");
+        const baseSal = Number(r.baseSalary !== undefined ? r.baseSalary : (r.employee ? r.employee.monthlySalary : 0));
+        const dedAmt = Number(r.deductionAmount !== undefined ? r.deductionAmount : r.CalculatedDeducation);
+        const finSal = Number(r.finalSalary !== undefined ? r.finalSalary : r.FinalSalary);
+        const leaveDaysVal = r.leaveDays !== undefined ? r.leaveDays : r.LeaveDays;
+        const noteVal = r.note !== undefined ? r.note : r.Note;
 
         const tr = document.createElement("tr");
         tr.innerHTML = `
-            <td>${r.id}</td>
-            <td>${escapeHtml(r.employeeName)}</td>
+            <td>#${recId}</td>
+            <td><strong>${escapeHtml(empName)}</strong></td>
             <td><span class="badge ${typeInfo.badge}">${escapeHtml(typeInfo.label)}</span></td>
-            <td>${r.leaveDays}</td>
-            <td>${formatCurrency(r.baseSalary)}</td>
-            <td class="highlight-negative">-${formatCurrency(r.deductionAmount)}</td>
-            <td class="highlight-positive">${formatCurrency(r.finalSalary)}</td>
-            <td>${escapeHtml(r.note || "-")}</td>
+            <td>${leaveDaysVal} Gün</td>
+            <td>${formatCurrency(baseSal)}</td>
+            <td class="highlight-negative">-${formatCurrency(dedAmt)}</td>
+            <td class="highlight-positive"><strong>${formatCurrency(finSal)}</strong></td>
+            <td>${escapeHtml(noteVal || "-")}</td>
         `;
         tbody.appendChild(tr);
     }
@@ -491,9 +580,13 @@ document.addEventListener("DOMContentLoaded", () => {
     initEmployeeModal();
     initSimForm();
 
-    document.getElementById("refreshListBtn").addEventListener("click", loadEmployees);
-    document.getElementById("refreshLeavesBtn").addEventListener("click", loadLeaves);
-    document.getElementById("searchInput").addEventListener("input", filterEmployeeTable);
+    const refList = document.getElementById("refreshListBtn");
+    const refLeaves = document.getElementById("refreshLeavesBtn");
+    const searchInp = document.getElementById("searchInput");
+
+    if (refList) refList.addEventListener("click", loadEmployees);
+    if (refLeaves) refLeaves.addEventListener("click", loadLeaves);
+    if (searchInp) searchInp.addEventListener("input", filterEmployeeTable);
 
     loadEmployees();
     loadLeaves();
