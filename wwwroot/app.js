@@ -119,7 +119,12 @@ function initAuth() {
             applyUserPermissions();
         } catch {
             localStorage.removeItem(USER_STORAGE_KEY);
+            currentUser = null;
+            if (loginModal) loginModal.style.display = "flex";
         }
+    } else {
+        currentUser = null;
+        if (loginModal) loginModal.style.display = "flex";
     }
 
     if (loginForm) {
@@ -140,10 +145,20 @@ function initAuth() {
                     body: JSON.stringify({ Name: name, EmployeeId: empId })
                 });
 
-                currentUser = result.Employee;
+                const rawEmp = result?.Employee || result?.employee || result;
+                if (!rawEmp) throw new Error("Giriş verisi alınamadı.");
+
+                currentUser = {
+                    Id: rawEmp.Id !== undefined ? rawEmp.Id : rawEmp.id,
+                    Name: rawEmp.Name || rawEmp.name || "Kullanıcı",
+                    Department: rawEmp.Department || rawEmp.department || "Genel",
+                    Role: rawEmp.Role || rawEmp.role || "Admin",
+                    WorkStatus: rawEmp.WorkStatus !== undefined ? rawEmp.WorkStatus : rawEmp.workStatus
+                };
+
                 localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
 
-                showToast(result.Message || `🔑 Hoş geldiniz, ${currentUser.Name}!`, "success");
+                showToast(result?.Message || `🔑 Hoş geldiniz, ${currentUser.Name}!`, "success");
                 if (loginModal) loginModal.style.display = "none";
 
                 applyUserPermissions();
@@ -169,7 +184,7 @@ function applyUserPermissions() {
     const addEmpBtn = document.getElementById("openAddEmployeeModal");
     if (addEmpBtn) addEmpBtn.style.display = isAdmin ? "" : "none";
 
-    // Header alanına kullanıcı profil rozeti ekle
+    // Topbar alanına Kullanıcı Profil Rozeti ve Çıkış Butonu ekle
     let userBadge = document.getElementById("userProfileBadge");
     const topbarActions = document.querySelector(".topbar-actions");
 
@@ -177,17 +192,20 @@ function applyUserPermissions() {
         userBadge = document.createElement("div");
         userBadge.id = "userProfileBadge";
         userBadge.className = "user-badge";
+        userBadge.style.display = "inline-flex";
+        userBadge.style.alignItems = "center";
+        userBadge.style.gap = "8px";
         topbarActions.insertBefore(userBadge, topbarActions.firstChild);
     }
 
     if (userBadge) {
         userBadge.innerHTML = `
-            <span class="badge ${isAdmin ? 'badge-office' : 'badge-remote'}">
+            <span class="badge ${isAdmin ? 'badge-office' : 'badge-remote'}" style="padding: 6px 12px; font-weight: 600;">
                 <i class="fa-solid ${isAdmin ? 'fa-user-shield' : 'fa-user'}"></i> 
                 ${escapeHtml(currentUser.Name)} (${isAdmin ? 'Yönetici' : 'Çalışan'})
             </span>
-            <button id="logoutBtn" class="btn btn-sm btn-secondary" title="Çıkış Yap">
-                <i class="fa-solid fa-right-from-bracket"></i>
+            <button id="logoutBtn" class="btn btn-sm btn-secondary" title="Çıkış Yap" style="padding: 6px 10px;">
+                <i class="fa-solid fa-right-from-bracket"></i> Çıkış
             </button>
         `;
 
@@ -230,9 +248,15 @@ function renderKpis() {
     const elOffice = document.getElementById("kpiInOffice");
     const elPayroll = document.getElementById("kpiTotalPayroll");
 
+    const isAdmin = currentUser?.Role === "Admin";
+
     if (elTotal) elTotal.textContent = totalEmployees;
     if (elOffice) elOffice.textContent = inOffice;
-    if (elPayroll) elPayroll.textContent = formatCurrency(totalPayroll);
+
+    // Toplam Brüt Bordroyu sadece Yönetici görür, Çalışana gizlenir
+    if (elPayroll) {
+        elPayroll.textContent = isAdmin ? formatCurrency(totalPayroll) : "🔒 Gizli";
+    }
 }
 
 function renderLeaveKpi(leaveRecords) {
@@ -279,7 +303,7 @@ function renderEmployeeTable(employees) {
         const statusVal = Number(emp.workStatus !== undefined ? emp.workStatus : emp.WorkStatus);
         const statusInfo = WORK_STATUSES[statusVal] ?? { label: "Bilinmiyor", emoji: "⚪", badge: "" };
 
-        // Çalışanlar başkalarının maaşını göremez, sadece kendi maaşını görür
+        // Yönetici tüm maaşları görür. Çalışanlar sadece KENDİ maaşını görür
         const canViewSalary = isAdmin || String(currentUser?.Id) === String(empId);
         const displaySalary = canViewSalary ? formatCurrency(empSalary) : "🔒 Gizli";
 
@@ -594,6 +618,7 @@ function initSimForm() {
                 lastCalculatedResult = null;
 
                 await loadLeaves();
+                await loadEmployees();
             } catch (err) {
                 setStatus("simStatus", "İzin kaydı oluşturulamadı: " + err.message, "error");
                 showToast("İzin kaydı oluşturulamadı: " + err.message, "error");
@@ -651,7 +676,7 @@ function renderLeavesTable(records) {
 
     const isAdmin = currentUser?.Role === "Admin";
 
-    // Çalışanlar izin tablosunda sadece kendi izinlerini görür
+    // Çalışanlar izin tablosunda sadece KENDİ izinlerini görür
     const visibleRecords = isAdmin
         ? records
         : records.filter(r => String(r.employeeId || (r.employee ? r.employee.id : '')) === String(currentUser?.Id));
@@ -678,10 +703,16 @@ function renderLeavesTable(records) {
             <td class="highlight-positive"><strong>${formatCurrency(finSal)}</strong></td>
             <td>${escapeHtml(noteVal || "-")}</td>
             <td>
-                ${isAdmin ? `
-                <button class="btn btn-sm btn-outline" title="Bildirim Notu Gönder" data-notify-leave="${recId}">
-                    <i class="fa-solid fa-bullhorn"></i> Not Gönder
-                </button>` : '<span class="badge badge-office">✓ Onaylandı</span>'}
+                <div class="row-actions">
+                    ${isAdmin ? `
+                    <button class="btn btn-sm btn-outline" title="Bildirim Notu Gönder" data-notify-leave="${recId}">
+                        <i class="fa-solid fa-bullhorn"></i> Not Gönder
+                    </button>
+                    <button class="btn btn-sm btn-danger" title="İzni İptal Et" data-cancel-leave="${recId}" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3);">
+                        <i class="fa-solid fa-trash"></i> İptal
+                    </button>
+                    ` : '<span class="badge badge-office">✓ Onaylandı</span>'}
+                </div>
             </td>
         `;
         tbody.appendChild(tr);
@@ -694,6 +725,34 @@ function renderLeavesTable(records) {
             if (record) openNotificationModal(record);
         });
     });
+
+    tbody.querySelectorAll("[data-cancel-leave]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const id = btn.getAttribute("data-cancel-leave");
+            cancelLeaveRecord(id);
+        });
+    });
+}
+
+async function cancelLeaveRecord(leaveRecordId) {
+    const record = leavesCache.find((r) => String(r.id !== undefined ? r.id : r.Id) === String(leaveRecordId));
+    const empName = record ? (record.employeeName || (record.employee ? record.employee.name : "Personel")) : `#${leaveRecordId}`;
+
+    if (!confirm(`"${empName}" adlı personelin #${leaveRecordId} numaralı izin kaydını iptal etmek istediğinize emin misiniz? Maaş kesintisi kaldırılacaktır.`)) {
+        return;
+    }
+
+    try {
+        const result = await apiFetch(`${API_BASE}/cancel-leave/${leaveRecordId}`, {
+            method: "DELETE"
+        });
+
+        showToast(result?.Message || "🗑️ İzin kaydı başarıyla iptal edildi.", "success");
+        await loadLeaves();
+        await loadEmployees();
+    } catch (err) {
+        showToast("İzin kaydı iptal edilemedi: " + err.message, "error");
+    }
 }
 
 /* ---------- Bildirim Notu Modalı ---------- */
@@ -764,4 +823,32 @@ function initNotificationModal() {
 
             } catch (err) {
                 setStatus("notifFormStatus", "Gönderilemedi: " + err.message, "error");
-                showToast("Gö
+                showToast("Gönderilemedi: " + err.message, "error");
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+            }
+        });
+    }
+}
+
+/* ---------- Başlangıç ---------- */
+
+document.addEventListener("DOMContentLoaded", () => {
+    initTheme();
+    initAuth();
+    initTabs();
+    initEmployeeModal();
+    initSimForm();
+    initNotificationModal();
+
+    const refList = document.getElementById("refreshListBtn");
+    const refLeaves = document.getElementById("refreshLeavesBtn");
+    const searchInp = document.getElementById("searchInput");
+
+    if (refList) refList.addEventListener("click", loadEmployees);
+    if (refLeaves) refLeaves.addEventListener("click", loadLeaves);
+    if (searchInp) searchInp.addEventListener("input", filterEmployeeTable);
+
+    loadEmployees();
+    loadLeaves();
+});

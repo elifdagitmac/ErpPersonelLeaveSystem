@@ -215,6 +215,7 @@
                             <th>İzin Kesintisi (-₺)</th>
                             <th>Net Ele Geçen Maaş (₺)</th>
                             <th>Açıklama</th>
+                            <th>İşlem / Bildirim</th>
                         </tr>
                     </thead>
                     <tbody id="leavesTableBody"></tbody>
@@ -306,10 +307,6 @@
         </div>
     </div>
 
-    <div id="toast" class="toast"></div>
-
-    <script src="app.js"></script>
-
     <!-- ============ İZİN BİLDİRİM NOTU MODAL ============ -->
     <div id="leaveNotificationModal" class="modal-overlay" hidden>
         <div class="modal glass">
@@ -349,6 +346,38 @@
         </div>
     </div>
 
+    <!-- ============ KURUMSAL GİRİŞ (LOGIN) MODAL ============ -->
+    <div id="loginModal" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.88); backdrop-filter: blur(10px); z-index: 9999; align-items: center; justify-content: center;">
+        <div class="modal glass" style="max-width: 420px; width: 90%; margin: auto;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-shield-halved"></i> Kurumsal Giriş</h3>
+            </div>
 
+            <form id="loginForm">
+                <div class="form-grid" style="grid-template-columns: 1fr; gap: 15px;">
+                    <div class="form-field">
+                        <label for="loginName">Ad Soyad</label>
+                        <input id="loginName" type="text" required placeholder="Adınız ve Soyadınız..." />
+                    </div>
+                    <div class="form-field">
+                        <label for="loginEmpId">Kurum / Personel ID</label>
+                        <input id="loginEmpId" type="number" min="1" required placeholder="Kurum ID numaranız..." />
+                    </div>
+                </div>
+
+                <div id="loginFormStatus" class="status-msg"></div>
+
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" id="submitLoginBtn" style="width: 100%; justify-content: center;">
+                        <i class="fa-solid fa-key"></i> Sisteme Giriş Yap
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="app.js"></script>
 </body>
 </html>
