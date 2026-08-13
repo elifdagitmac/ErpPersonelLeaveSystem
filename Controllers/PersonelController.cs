@@ -130,16 +130,7 @@ public class PersonnelController : ControllerBase
     {
         try
         {
-            dynamic calcService = _calculationService;
-            dynamic result;
-            try
-            {
-                result = calcService.CalculateLeaveDeduction(monthlySalary, leaveType, leaveDays);
-            }
-            catch
-            {
-                result = calcService.CalculateDeduction(monthlySalary, leaveType, leaveDays);
-            }
+            var result = _calculationService.CalculatePayroll(monthlySalary, leaveType, leaveDays);
             return Ok(result);
         }
         catch (Exception ex)
@@ -148,7 +139,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 7. TÜM İZİN KAYITLARINI GETİR (GET /api/personnel/leaves)
+    // 7. TÜM ONAYLI İZİN KAYITLARINI GETİR (GET /api/personnel/leaves)
     [HttpGet("leaves")]
     public async Task<IActionResult> GetAllLeaves()
     {
@@ -156,6 +147,7 @@ public class PersonnelController : ControllerBase
         {
             var leaves = await _context.leaveRecords
                 .Include(l => l.employee)
+                .Where(l => l.Status == LeaveStatus.Approved)
                 .Select(l => new
                 {
                     l.Id,
@@ -164,9 +156,12 @@ public class PersonnelController : ControllerBase
                     BaseSalary = l.employee != null ? l.employee.MonthlySalary : 0,
                     l.LeaveType,
                     l.LeaveDays,
+                    l.StartDate,
+                    l.EndDate,
                     DeductionAmount = l.CalculatedDeducation,
                     FinalSalary = l.FinalSalary,
-                    l.Note
+                    l.Note,
+                    Status = (int)l.Status
                 })
                 .ToListAsync();
 
@@ -178,7 +173,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 8. YENİ İZİN KAYDI EKLE VEYA ONAYLA (POST /api/personnel/add-leave)
+    // 8. DOĞRUDAN İZİN EKLE (ESKİ ONAY YÖNTEMİ) (POST /api/personnel/add-leave)
     [HttpPost("add-leave")]
     public async Task<IActionResult> AddLeaveRecord([FromBody] LeaveRecord leaveRecord)
     {
@@ -188,21 +183,12 @@ public class PersonnelController : ControllerBase
             if (employee == null)
                 return NotFound("İzin verilecek personel bulunamadı.");
 
-            dynamic calcService = _calculationService;
-            dynamic calcResult;
-            try
-            {
-                calcResult = calcService.CalculateLeaveDeduction(employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
-            }
-            catch
-            {
-                calcResult = calcService.CalculateDeduction(employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
-            }
+            var calcResult = _calculationService.CalculatePayroll(employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
 
             leaveRecord.CalculatedDeducation = calcResult.DeductionAmount;
             leaveRecord.FinalSalary = calcResult.FinalNetSalary;
+            leaveRecord.Status = LeaveStatus.Approved;
 
-            // Eğer onaylanan izin bugün veya aktif bir izinse PDKS durumunu İzinli (3) yap
             employee.WorkStatus = (WorkStatusType)3;
 
             await _context.leaveRecords.AddAsync(leaveRecord);
@@ -216,7 +202,181 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 9. PERSONELE İZİN BİLDİRİM NOTU GÖNDER (POST /api/personnel/send-notification)
+    // 9. AKILLI ÇALIŞAN İZİN TALEBİ GÖNDERME KAPISI (POST /api/personnel/request-leave)
+    [HttpPost("request-leave")]
+    public async Task<IActionResult> RequestLeave([FromBody] LeaveRecord leaveRecord)
+    {
+        try
+        {
+            var employee = await _context.employees.FindAsync(leaveRecord.employeeId);
+            if (employee == null)
+                return NotFound(new { Message = "İzin isteyecek personel bulunamadı." });
+
+            if (leaveRecord.EndDate <= leaveRecord.StartDate)
+                return BadRequest(new { Message = "İzin bitiş tarihi, başlangıç tarihinden sonra olmalıdır." });
+
+            int requestedDays = (leaveRecord.EndDate.Date - leaveRecord.StartDate.Date).Days + 1;
+            leaveRecord.LeaveDays = requestedDays;
+
+            // 🛡️ 1. ALTIN KURAL: YILLIK İZİN HAKKI KONTROLÜ
+            if (leaveRecord.LeaveType == LeaveType.YillikIzin)
+            {
+                int annualAllowance = employee.ExperienceYears >= 5 ? 20 : 14;
+
+                var totalUsedDays = await _context.leaveRecords
+                    .Where(l => l.employeeId == employee.Id && l.LeaveType == LeaveType.YillikIzin && l.Status == LeaveStatus.Approved)
+                    .SumAsync(l => l.LeaveDays);
+
+                int remainingDays = annualAllowance - totalUsedDays;
+
+                if (requestedDays > remainingDays)
+                {
+                    return BadRequest(new { Message = $"❌ İzin talebi reddedildi! Yıllık izin hakkınız yetersiz. Kalan izin hakkınız: {remainingDays} gün. Talep edilen: {requestedDays} gün." });
+                }
+            }
+
+            // 🛡️ 2. ALTIN KURAL: DEPARTMAN MİNİMUM İŞ DEVAMLILIĞI (EN AZ 2 KİŞİ KALMALI!)
+            var totalDeptStaff = await _context.employees
+                .CountAsync(e => e.Department == employee.Department);
+
+            var overlappingLeavesCount = await _context.leaveRecords
+                .Include(l => l.employee)
+                .Where(l => l.employee != null &&
+                            l.employee.Department == employee.Department &&
+                            l.Status == LeaveStatus.Approved &&
+                            l.StartDate.Date <= leaveRecord.EndDate.Date &&
+                            l.EndDate.Date >= leaveRecord.StartDate.Date)
+                .Select(l => l.employeeId)
+                .Distinct()
+                .CountAsync();
+
+            int remainingActiveStaff = totalDeptStaff - overlappingLeavesCount - 1;
+
+            if (remainingActiveStaff < 2 && totalDeptStaff >= 3)
+            {
+                return BadRequest(new { Message = $"❌ İzin talebi reddedildi! '{employee.Department}' departmanında iş devamlılığı için en az 2 aktif personel bulunmalıdır. O tarihlerde aktif kalacak personel sayısı: {remainingActiveStaff + 1}." });
+            }
+
+            leaveRecord.Status = LeaveStatus.Pending;
+            leaveRecord.CalculatedDeducation = 0;
+            leaveRecord.FinalSalary = employee.MonthlySalary;
+
+            await _context.leaveRecords.AddAsync(leaveRecord);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"⏳ İzin talebiniz ({requestedDays} gün) başarıyla oluşturuldu ve Yönetici onayına gönderildi!",
+                Record = leaveRecord
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "İzin talebi oluşturulamadı.", Error = ex.Message });
+        }
+    }
+
+    // 10. BEKLEYEN İZİN TALEPLERİNİ GETİR (GET /api/personnel/pending-leaves)
+    [HttpGet("pending-leaves")]
+    public async Task<IActionResult> GetPendingLeaves()
+    {
+        try
+        {
+            var pendingLeaves = await _context.leaveRecords
+                .Include(l => l.employee)
+                .Where(l => l.Status == LeaveStatus.Pending)
+                .Select(l => new
+                {
+                    l.Id,
+                    l.employeeId,
+                    EmployeeName = l.employee != null ? l.employee.Name : "Bilinmiyor",
+                    Department = l.employee != null ? l.employee.Department : "Genel",
+                    BaseSalary = l.employee != null ? l.employee.MonthlySalary : 0,
+                    l.LeaveType,
+                    l.LeaveDays,
+                    l.StartDate,
+                    l.EndDate,
+                    l.Note,
+                    Status = (int)l.Status
+                })
+                .ToListAsync();
+
+            return Ok(pendingLeaves);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Bekleyen izin talepleri alınamadı.", Error = ex.Message });
+        }
+    }
+
+    // 11. YÖNETİCİ İZİN TALEBİ ONAYLAMA KAPISI (POST /api/personnel/approve-leave/{id})
+    [HttpPost("approve-leave/{id}")]
+    public async Task<IActionResult> ApproveLeave(int id)
+    {
+        try
+        {
+            var leaveRecord = await _context.leaveRecords
+                .Include(l => l.employee)
+                .FirstOrDefaultAsync(l => l.Id == id);
+
+            if (leaveRecord == null)
+                return NotFound("Onaylanacak izin kaydı bulunamadı.");
+
+            if (leaveRecord.employee == null)
+                return NotFound("İzin kaydına bağlı personel bulunamadı.");
+
+            var calcResult = _calculationService.CalculatePayroll(leaveRecord.employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
+
+            leaveRecord.CalculatedDeducation = calcResult.DeductionAmount;
+            leaveRecord.FinalSalary = calcResult.FinalNetSalary;
+            leaveRecord.Status = LeaveStatus.Approved;
+
+            leaveRecord.employee.WorkStatus = (WorkStatusType)3;
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"✅ '{leaveRecord.employee.Name}' adlı personelin izin talebi onaylandı ve maaş kesintisi işlendi!"
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "İzin talebi onaylanamadı.", Error = ex.Message });
+        }
+    }
+
+    // 12. YÖNETİCİ İZİN TALEBİ REDDETME KAPISI (POST /api/personnel/reject-leave/{id})
+    [HttpPost("reject-leave/{id}")]
+    public async Task<IActionResult> RejectLeave(int id)
+    {
+        try
+        {
+            var leaveRecord = await _context.leaveRecords
+                .Include(l => l.employee)
+                .FirstOrDefaultAsync(l => l.Id == id);
+
+            if (leaveRecord == null)
+                return NotFound("Reddedilecek izin kaydı bulunamadı.");
+
+            leaveRecord.Status = LeaveStatus.Rejected;
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"🔴 #{id} numaralı izin talebi reddedildi."
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "İzin talebi reddedilemedi.", Error = ex.Message });
+        }
+    }
+
+    // 13. PERSONELE İZİN BİLDİRİM NOTU GÖNDER (POST /api/personnel/send-notification)
     [HttpPost("send-notification")]
     public async Task<IActionResult> SendLeaveNotification([FromBody] LeaveNotificationRequest request)
     {
@@ -250,7 +410,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 10. TURNİKEDEN RFID KART OKUTMA KAPISI (POST /api/personnel/swipe-card)
+    // 14. TURNİKEDEN RFID KART OKUTMA KAPISI (POST /api/personnel/swipe-card)
     [HttpPost("swipe-card")]
     public async Task<IActionResult> SwipeCard([FromBody] CardSwipeRequest request)
     {
@@ -290,13 +450,12 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 11. KURUMSAL KULLANICI GİRİŞİ (POST /api/personnel/login)
+    // 15. KURUMSAL KULLANICI GİRİŞİ (POST /api/personnel/login)
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         try
         {
-            // Veritabanı tamamen boşsa otomatik varsayılan Yöneticiyi ekle ve kaydet
             if (!await _context.employees.AnyAsync())
             {
                 var defaultAdmin = new Employee
@@ -360,7 +519,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 12. SAHTE TEST VERİSETİNİ VERİTABANINA YÜKLE (POST /api/personnel/seed-data)
+    // 16. SAHTE TEST VERİSETİNİ VERİTABANINA YÜKLE (POST /api/personnel/seed-data)
     [HttpPost("seed-data")]
     public async Task<IActionResult> SeedTestData()
     {
@@ -389,7 +548,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 13. YÖNETİCİ İZİN İPTAL ETME KAPISI (DELETE /api/personnel/cancel-leave/{id})
+    // 17. YÖNETİCİ İZİN İPTAL ETME KAPISI (DELETE /api/personnel/cancel-leave/{id})
     [HttpDelete("cancel-leave/{id}")]
     public async Task<IActionResult> CancelLeave(int id)
     {
@@ -404,10 +563,8 @@ public class PersonnelController : ControllerBase
 
             var employeeName = leaveRecord.employee != null ? leaveRecord.employee.Name : "Personel";
 
-            // İzin kaydını veritabanından sil
             _context.leaveRecords.Remove(leaveRecord);
 
-            // Eğer personelin PDKS durumu İzinli (3) ise tekrar Ofiste (1) durumuna döndür
             if (leaveRecord.employee != null && leaveRecord.employee.WorkStatus == (WorkStatusType)3)
             {
                 leaveRecord.employee.WorkStatus = (WorkStatusType)1;
@@ -424,6 +581,66 @@ public class PersonnelController : ControllerBase
         catch (Exception ex)
         {
             return StatusCode(500, new { Message = "İzin kaydı iptal edilemedi.", Error = ex.Message });
+        }
+    }
+
+    // 18. EXCEL / CSV DOSYASINDAN TOPLU PERSONEL YÜKLE (POST /api/personnel/import-csv)
+    [HttpPost("import-csv")]
+    public async Task<IActionResult> ImportCsv(IFormFile file)
+    {
+        try
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(new { Message = "Lütfen geçerli bir CSV veya Excel dosyası seçiniz." });
+
+            var newEmployees = new List<Employee>();
+
+            using (var reader = new StreamReader(file.OpenReadStream()))
+            {
+                string? headerLine = await reader.ReadLineAsync(); // Header satırını atla
+                string? line;
+                while ((line = await reader.ReadLineAsync()) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+
+                    // Hem virgül (,) hem noktalı virgül (;) otomatik algılama
+                    char separator = line.Contains(';') ? ';' : ',';
+                    var parts = line.Split(separator);
+
+                    if (parts.Length < 8) continue;
+
+                    var emp = new Employee
+                    {
+                        Name = parts[0].Trim(),
+                        Department = parts[1].Trim(),
+                        ExperienceYears = int.TryParse(parts[2].Trim(), out int exp) ? exp : 0,
+                        EducationLevel = string.IsNullOrWhiteSpace(parts[3].Trim()) ? "Lisans" : parts[3].Trim(),
+                        Age = int.TryParse(parts[4].Trim(), out int age) ? age : 25,
+                        Gender = string.IsNullOrWhiteSpace(parts[5].Trim()) ? "Belirtilmedi" : parts[5].Trim(),
+                        MonthlySalary = decimal.TryParse(parts[6].Trim(), out decimal sal) ? sal : 40000,
+                        WorkStatus = (WorkStatusType)(int.TryParse(parts[7].Trim(), out int status) ? status : 1)
+                    };
+
+                    newEmployees.Add(emp);
+                }
+            }
+
+            if (newEmployees.Count == 0)
+                return BadRequest(new { Message = "Dosyadan okunabilir personel verisi çıkarılamadı." });
+
+            await _context.employees.AddRangeAsync(newEmployees);
+            await _context.SaveChangesAsync();
+
+            return Ok(new
+            {
+                Success = true,
+                Message = $"✅ {newEmployees.Count} adet personel başarıyla veritabanına aktarıldı ve sisteme işlendi!",
+                TotalImported = newEmployees.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "CSV yükleme işlemi başarısız.", Error = ex.Message });
         }
     }
 }

@@ -41,7 +41,14 @@
 
         <nav class="tabs">
             <button class="tab-btn active" data-tab="tab-dashboard">
-                <i class="fa-solid fa-chart-line"></i> Dashboard &amp; Canlı Simülatör
+                <i class="fa-solid fa-chart-line"></i> Dashboard &amp; İzin Talebi
+            </button>
+            <button class="tab-btn" data-tab="tab-pending" id="pendingTabBtn" style="display: none;">
+                <i class="fa-solid fa-clock-rotate-left"></i> ⏳ İzin Talepleri &amp; Onay Paneli
+                <span id="pendingBadge" class="badge-count" hidden>0</span>
+            </button>
+            <button class="tab-btn" data-tab="tab-calendar">
+                <i class="fa-solid fa-calendar-days"></i> 📅 İzin Takvimi
             </button>
             <button class="tab-btn" data-tab="tab-explorer">
                 <i class="fa-solid fa-database"></i> Veritabanı Gezgini
@@ -86,9 +93,9 @@
                 </div>
             </div>
 
-            <!-- CANLI SİMÜLATÖR -->
+            <!-- CANLI SİMÜLATÖR & TALEP FORMU -->
             <div class="panel-title-row">
-                <h2><i class="fa-solid fa-bolt"></i> Canlı İzin &amp; Maaş Simülatörü</h2>
+                <h2><i class="fa-solid fa-bolt"></i> Canlı İzin Talebi &amp; Maaş Simülatörü</h2>
             </div>
 
             <div class="sim-layout">
@@ -110,12 +117,20 @@
                             </select>
                         </div>
                         <div class="form-field">
-                            <label for="simLeaveDays">İzin Günü</label>
-                            <input id="simLeaveDays" type="number" min="1" max="365" value="1" required />
+                            <label for="simStartDate">İzin Başlangıç Tarihi</label>
+                            <input id="simStartDate" type="date" required />
+                        </div>
+                        <div class="form-field">
+                            <label for="simEndDate">İzin Bitiş Tarihi</label>
+                            <input id="simEndDate" type="date" required />
+                        </div>
+                        <div class="form-field">
+                            <label for="simLeaveDays">Hesaplanan İzin Günü</label>
+                            <input id="simLeaveDays" type="number" min="1" max="365" value="1" required readonly style="background: rgba(255,255,255,0.05);" />
                         </div>
                         <div class="form-field span-2">
-                            <label for="simNote">Açıklama (opsiyonel)</label>
-                            <input id="simNote" type="text" maxlength="250" placeholder="İzin ile ilgili not..." />
+                            <label for="simNote">Açıklama / İzin Nedeni (opsiyonel)</label>
+                            <input id="simNote" type="text" maxlength="250" placeholder="İzin nedeni veya detay..." />
                         </div>
                     </div>
 
@@ -123,10 +138,10 @@
 
                     <div class="form-actions">
                         <button type="submit" id="calcBtn" class="btn btn-primary">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> Hesaplamayı Simüle Et
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Kesintiyi Simüle Et
                         </button>
                         <button type="button" id="confirmLeaveBtn" class="btn btn-success" disabled>
-                            <i class="fa-solid fa-check"></i> İzin Talebini Onayla ve Kaydet
+                            <i class="fa-solid fa-paper-plane"></i> İzin Talebi Gönder ⏳
                         </button>
                     </div>
                 </form>
@@ -160,6 +175,10 @@
             <div class="panel-title-row">
                 <h2><i class="fa-solid fa-id-card-clip"></i> Personel Kadrosu &amp; İşlemler</h2>
                 <div class="panel-actions">
+                    <input type="file" id="csvFileInput" accept=".csv" style="display: none;" />
+                    <button id="uploadCsvBtn" class="btn btn-secondary" type="button" style="display: none;">
+                        <i class="fa-solid fa-file-csv"></i> 📁 Excel / CSV Yükle
+                    </button>
                     <div class="search-box">
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input id="searchInput" type="text" placeholder="Ada veya departmana göre ara..." />
@@ -190,11 +209,75 @@
             </div>
         </section>
 
+        <!-- ============ YÖNETİCİ İZİN TALEPLERİ & ONAY PANELİ ============ -->
+        <section id="tab-pending" class="tab-panel">
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-hourglass-half"></i> Onay Bekleyen İzin Talepleri</h2>
+                <div class="panel-actions">
+                    <button id="refreshPendingBtn" class="btn btn-secondary" type="button">
+                        <i class="fa-solid fa-rotate"></i> Yenile
+                    </button>
+                </div>
+            </div>
+
+            <div id="pendingStatus" class="status-msg"></div>
+
+            <div class="table-wrapper glass">
+                <table id="pendingLeavesTable">
+                    <thead>
+                        <tr>
+                            <th>Talep ID</th>
+                            <th>Personel Adı</th>
+                            <th>Departman</th>
+                            <th>İzin Türü</th>
+                            <th>Tarih Aralığı</th>
+                            <th>İzin Günü</th>
+                            <th>Açıklama</th>
+                            <th>Onay / Red İşlemi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pendingLeavesTableBody"></tbody>
+                </table>
+                <p id="emptyPendingMsg" class="empty-msg" hidden>Şu an onay bekleyen bir izin talebi yok.</p>
+            </div>
+        </section>
+
+        <!-- ============ DEPARTMAN GÖRSEL İZİN TAKVİMİ ============ -->
+        <section id="tab-calendar" class="tab-panel">
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-calendar-days"></i> Departman Görsel İzin Takvimi</h2>
+                <div class="panel-actions">
+                    <select id="calDeptFilter" class="search-box" style="padding: 8px 12px; border-radius: 8px;">
+                        <option value="">Tüm Departmanlar</option>
+                        <option value="IT & Yazılım">IT &amp; Yazılım</option>
+                        <option value="İnsan Kaynakları">İnsan Kaynakları</option>
+                        <option value="Pazarlama & Satış">Pazarlama &amp; Satış</option>
+                        <option value="Finans & Muhasebe">Finans &amp; Muhasebe</option>
+                        <option value="Lojistik & Operasyon">Lojistik &amp; Operasyon</option>
+                        <option value="Yönetim">Yönetim</option>
+                    </select>
+                    <button id="prevMonthBtn" class="btn btn-secondary" type="button"><i class="fa-solid fa-chevron-left"></i> Önceki Ay</button>
+                    <span id="currentMonthYearLabel" style="font-weight: 700; font-size: 1.1rem; padding: 0 10px;">Ağustos 2026</span>
+                    <button id="nextMonthBtn" class="btn btn-secondary" type="button">Sonraki Ay <i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+
+            <div class="table-wrapper glass" style="padding: 20px; border-radius: 16px; margin-top: 15px;">
+                <div style="display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-weight: 700; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 12px; color: var(--accent-color);">
+                    <div>Pzt</div><div>Sal</div><div>Çar</div><div>Per</div><div>Cum</div><div>Cmt</div><div>Paz</div>
+                </div>
+                <div id="calendarGrid" style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; min-height: 450px;"></div>
+            </div>
+        </section>
+
         <!-- ============ VERİTABANI GEZGİNİ ============ -->
         <section id="tab-explorer" class="tab-panel">
             <div class="panel-title-row">
                 <h2><i class="fa-solid fa-clock-rotate-left"></i> Onaylanan İzin Kayıtları</h2>
                 <div class="panel-actions">
+                    <button id="exportLeavesCsvBtn" class="btn btn-secondary" type="button">
+                        <i class="fa-solid fa-file-excel"></i> 📊 Excel İzin Dökümünü İndir
+                    </button>
                     <button id="refreshLeavesBtn" class="btn btn-secondary" type="button">
                         <i class="fa-solid fa-rotate"></i> Yenile
                     </button>
@@ -210,6 +293,7 @@
                             <th>Kayıt ID</th>
                             <th>Personel Adı</th>
                             <th>İzin Türü</th>
+                            <th>Tarih Aralığı</th>
                             <th>İzin Günü</th>
                             <th>Kesintisiz Taban Maaş (₺)</th>
                             <th>İzin Kesintisi (-₺)</th>
@@ -347,21 +431,24 @@
     </div>
 
     <!-- ============ KURUMSAL GİRİŞ (LOGIN) MODAL ============ -->
-    <div id="loginModal" class="modal-overlay" style="display: flex; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.88); backdrop-filter: blur(10px); z-index: 9999; align-items: center; justify-content: center;">
+    <div id="loginModal" class="modal-overlay" style="display: flex;">
         <div class="modal glass" style="max-width: 420px; width: 90%; margin: auto;">
             <div class="modal-header">
                 <h3><i class="fa-solid fa-shield-halved"></i> Kurumsal Giriş</h3>
+                <button class="modal-close" id="closeLoginModalBtn" type="button" onclick="document.getElementById('loginModal').style.display='none'">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             </div>
 
             <form id="loginForm">
                 <div class="form-grid" style="grid-template-columns: 1fr; gap: 15px;">
                     <div class="form-field">
                         <label for="loginName">Ad Soyad</label>
-                        <input id="loginName" type="text" required placeholder="Adınız ve Soyadınız..." />
+                        <input id="loginName" type="text" placeholder="Adınız (boş kalabilir)..." />
                     </div>
                     <div class="form-field">
                         <label for="loginEmpId">Kurum / Personel ID</label>
-                        <input id="loginEmpId" type="number" min="1" required placeholder="Kurum ID numaranız..." />
+                        <input id="loginEmpId" type="number" min="1" placeholder="ID (boş kalırsa 1 sayılır)..." />
                     </div>
                 </div>
 

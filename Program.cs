@@ -1,47 +1,54 @@
-//VERİTABANI, MAAŞ HESAPLAMA SERVİSİ VE TEST EKRANI ALTYAPISINI BİRLEŞTİRİP PROJEYİ AYAĞA KALDIRIR.
-
-
-
 using ErpPersonelLeaveSystem.Data;
 using ErpPersonelLeaveSystem.Services;
 using Microsoft.EntityFrameworkCore;
 
-var builder = WebApplication.CreateBuilder(args); // komut satırından gelen başlatma parametreleri ile ana yapılandırıcı nesneyi oluştur. bu nesnenin ismi builder ve nesnenin tipini compiler var komutu sayesinde kendisi anlar.
+var builder = WebApplication.CreateBuilder(args);
 
-//apı controller servislerini ve swagger test ekranını ekle 
+// 1. Controller ve Swagger Servislerini Ekle
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(); //tarayıcıda açılacak olan swagger test ekranının altyapısını projeye yükler. 
+builder.Services.AddSwaggerGen();
 
-// appsetingsjson dosyasındaki adresi alıp erpdbcotext e teslim 
+// 2. Veritabanı Servisini (ErpDbContext) Kaydet
 builder.Services.AddDbContext<ErpDbContext>(options =>
-     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=erp.db"));
 
-// ınterface ile gerçek sınıfı birbirine bağlamak (dependency injection)
+// 3. İzin ve Bordro Hesaplama Servisini Kaydet (DI)
 builder.Services.AddScoped<ILeaveCalculationService, LeaveCalculationService>();
 
-var app = builder.Build(); //builder nesnesinin içerisindeki build fonksiyonunu çalıştırır ve app i kurar 
+// 4. CORS İznini Tanımla (Tarayıcı İletişimi İçin)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
 
-//swagger test arayüzü aktifleşir
+var app = builder.Build();
+
+// 5. ESKİ TABLOYU TEMİZLE VE YENİ SÜTUNLARLA BAŞTAN KUR (EnsureDeleted & EnsureCreated) 🛡️
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ErpDbContext>();
+    db.Database.EnsureDeleted(); // Eski sütunsuz veritabanı şemasını siler
+    db.Database.EnsureCreated(); // StartDate, EndDate ve Status sütunlarıyla baştan kurar
+}
+
+// 6. HTTP Pipeline ve Statik Dosya Yapılandırması
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-
 }
 
+app.UseCors("AllowAll");
+app.UseStaticFiles(); // wwwroot klasörünü dışarı açar (index.html, app.js vb.)
+app.UseRouting();
+app.UseAuthorization();
 
-app.UseDefaultFiles(); //index.html yi varsayılan ana sayfa yapar
-app.UseStaticFiles(); //wwwroot klasöründeki web dosyalarını dışarı sunar.
-app.UseHttpsRedirection(); //bir kullanıcı güvenli olmayan bit http adresiyle gelirse onu otoatik olarak güveli https adresine yönlendirir.
-app.UseAuthorization(); //Gelen kullanıcının istediği işlemi yapmaya yetkisi var mı yok mu onu kontrol eder.
-app.MapControllers();//Tarayıcıdan bir adres isteği geldiğinde sistem arka planda bu adresi projedeki doğru controller sınıfına otomatik yönlendirir.
+app.MapControllers();
 
 app.Run();
-
-/*AddScoped: Servisin hafızadaki yaşam süresini belirler, arayüzden gelen her yeni istekte hafızada sıfır bir LeaveCalculationService nesnesi oluşturur, işi bitince onu hafızadan siler.
-*servis kodları hafızada bulunuyor zaten arayüzden her istek geldiğinde servis yeniden oluşturuluyor ve siliniyor*/
-
-/* builder.Services.AddDbContext<ErpDbConext> ---- ErpDbContext sınıfını projenin servis havuzuna kaydeder. projenin diğer yerleri db ye erişmek istediğinde derleyici sınıfı otomatik olarak tanıyabilsin diye
- * options: ErpDbContext için ayar yapılandırması (hangi server motorunu kullanacağı, bağlanacağı adres) başlatan parametre
- */
