@@ -26,9 +26,9 @@ public class ErpDbContext : DbContext //dbcontext ten yetenekler miras alır (ko
     //SQL Server da oluşacak 'LeaveRecord' Tablomuz 
     public DbSet<LeaveRecord> leaveRecords { get; set; }
 
+    public DbSet<AdvanceExpenseRecord> advanceExpenseRecords { get; set; } //sql server da oluşacak avans gider tablomuz 
 
-
-
+    public DbSet<Announcement> announcements { get; set; } 
 
 
 

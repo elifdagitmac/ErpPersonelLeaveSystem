@@ -780,3 +780,16 @@ tbody tr:hover {
     border-color: var(--success);
     color: var(--success);
 }
+
+/* Avans ve Masraf Özel Etiket Stilleri */
+.badge-advance {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.badge-expense {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.4);
+}

@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ErpPersonelLeaveSystem.models;
 
-
 public class LeaveRecord
 {
     [Key]
@@ -19,7 +18,7 @@ public class LeaveRecord
     public LeaveType LeaveType { get; set; }
 
     [Required]
-    public int LeaveDays { get; set; }
+    public decimal LeaveDays { get; set; } = 1;
 
     [Required]
     public DateTime StartDate { get; set; } = DateTime.Now;
@@ -36,4 +35,3 @@ public class LeaveRecord
 
     public LeaveStatus Status { get; set; } = LeaveStatus.Approved;
 }
-

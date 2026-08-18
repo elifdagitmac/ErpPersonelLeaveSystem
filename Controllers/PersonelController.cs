@@ -12,6 +12,18 @@ public class CardSwipeRequest
     public string CardUid { get; set; } = string.Empty;
 }
 
+public class LoginRequest
+{
+    public int EmployeeId { get; set; }
+    public string? Name { get; set; }
+}
+
+public class LeaveNotificationRequest
+{
+    public int LeaveRecordId { get; set; }
+    public string MessageNote { get; set; } = string.Empty;
+}
+
 [ApiController]
 [Route("api/personnel")]
 public class PersonnelController : ControllerBase
@@ -126,7 +138,7 @@ public class PersonnelController : ControllerBase
 
     // 6. İZİN VE MAAŞ KESİNTİSİ SİMÜLE ET (POST /api/personnel/calculate)
     [HttpPost("calculate")]
-    public IActionResult CalculateDeduction([FromQuery] decimal monthlySalary, [FromQuery] LeaveType leaveType, [FromQuery] int leaveDays)
+    public IActionResult CalculateDeduction([FromQuery] decimal monthlySalary, [FromQuery] LeaveType leaveType, [FromQuery] decimal leaveDays)
     {
         try
         {
@@ -173,7 +185,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 8. DOĞRUDAN İZİN EKLE (ESKİ ONAY YÖNTEMİ) (POST /api/personnel/add-leave)
+    // 8. DOĞRUDAN İZİN EKLE (POST /api/personnel/add-leave)
     [HttpPost("add-leave")]
     public async Task<IActionResult> AddLeaveRecord([FromBody] LeaveRecord leaveRecord)
     {
@@ -202,7 +214,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 9. AKILLI ÇALIŞAN İZİN TALEBİ GÖNDERME KAPISI (POST /api/personnel/request-leave)
+    // 9. İZİN TALEBİ GÖNDERME (POST /api/personnel/request-leave)
     [HttpPost("request-leave")]
     public async Task<IActionResult> RequestLeave([FromBody] LeaveRecord leaveRecord)
     {
@@ -212,13 +224,12 @@ public class PersonnelController : ControllerBase
             if (employee == null)
                 return NotFound(new { Message = "İzin isteyecek personel bulunamadı." });
 
-            if (leaveRecord.EndDate <= leaveRecord.StartDate)
-                return BadRequest(new { Message = "İzin bitiş tarihi, başlangıç tarihinden sonra olmalıdır." });
+            if (leaveRecord.EndDate < leaveRecord.StartDate)
+                return BadRequest(new { Message = "İzin bitiş tarihi, başlangıç tarihinden önce olamaz." });
 
-            int requestedDays = (leaveRecord.EndDate.Date - leaveRecord.StartDate.Date).Days + 1;
+            decimal requestedDays = leaveRecord.LeaveDays > 0 ? leaveRecord.LeaveDays : ((leaveRecord.EndDate.Date - leaveRecord.StartDate.Date).Days + 1);
             leaveRecord.LeaveDays = requestedDays;
 
-            // 🛡️ 1. ALTIN KURAL: YILLIK İZİN HAKKI KONTROLÜ
             if (leaveRecord.LeaveType == LeaveType.YillikIzin)
             {
                 int annualAllowance = employee.ExperienceYears >= 5 ? 20 : 14;
@@ -227,17 +238,15 @@ public class PersonnelController : ControllerBase
                     .Where(l => l.employeeId == employee.Id && l.LeaveType == LeaveType.YillikIzin && l.Status == LeaveStatus.Approved)
                     .SumAsync(l => l.LeaveDays);
 
-                int remainingDays = annualAllowance - totalUsedDays;
+                decimal remainingDays = annualAllowance - totalUsedDays;
 
                 if (requestedDays > remainingDays)
                 {
-                    return BadRequest(new { Message = $"❌ İzin talebi reddedildi! Yıllık izin hakkınız yetersiz. Kalan izin hakkınız: {remainingDays} gün. Talep edilen: {requestedDays} gün." });
+                    return BadRequest(new { Message = $"❌ İzin talebi reddedildi! Yıllık izin hakkınız yetersiz. Kalan izin hakkınız: {remainingDays} gün." });
                 }
             }
 
-            // 🛡️ 2. ALTIN KURAL: DEPARTMAN MİNİMUM İŞ DEVAMLILIĞI (EN AZ 2 KİŞİ KALMALI!)
-            var totalDeptStaff = await _context.employees
-                .CountAsync(e => e.Department == employee.Department);
+            var totalDeptStaff = await _context.employees.CountAsync(e => e.Department == employee.Department);
 
             var overlappingLeavesCount = await _context.leaveRecords
                 .Include(l => l.employee)
@@ -254,7 +263,7 @@ public class PersonnelController : ControllerBase
 
             if (remainingActiveStaff < 2 && totalDeptStaff >= 3)
             {
-                return BadRequest(new { Message = $"❌ İzin talebi reddedildi! '{employee.Department}' departmanında iş devamlılığı için en az 2 aktif personel bulunmalıdır. O tarihlerde aktif kalacak personel sayısı: {remainingActiveStaff + 1}." });
+                return BadRequest(new { Message = $"❌ İzin talebi reddedildi! '{employee.Department}' departmanında iş devamlılığı için en az 2 aktif personel bulunmalıdır." });
             }
 
             leaveRecord.Status = LeaveStatus.Pending;
@@ -277,7 +286,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 10. BEKLEYEN İZİN TALEPLERİNİ GETİR (GET /api/personnel/pending-leaves)
+    // 10. BEKLEYEN İZİN TALEPLERİ (GET /api/personnel/pending-leaves)
     [HttpGet("pending-leaves")]
     public async Task<IActionResult> GetPendingLeaves()
     {
@@ -310,37 +319,24 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 11. YÖNETİCİ İZİN TALEBİ ONAYLAMA KAPISI (POST /api/personnel/approve-leave/{id})
+    // 11. YÖNETİCİ İZİN ONAYLAMA (POST /api/personnel/approve-leave/{id})
     [HttpPost("approve-leave/{id}")]
     public async Task<IActionResult> ApproveLeave(int id)
     {
         try
         {
-            var leaveRecord = await _context.leaveRecords
-                .Include(l => l.employee)
-                .FirstOrDefaultAsync(l => l.Id == id);
-
-            if (leaveRecord == null)
-                return NotFound("Onaylanacak izin kaydı bulunamadı.");
-
-            if (leaveRecord.employee == null)
-                return NotFound("İzin kaydına bağlı personel bulunamadı.");
+            var leaveRecord = await _context.leaveRecords.Include(l => l.employee).FirstOrDefaultAsync(l => l.Id == id);
+            if (leaveRecord == null || leaveRecord.employee == null) return NotFound("İzin kaydı bulunamadı.");
 
             var calcResult = _calculationService.CalculatePayroll(leaveRecord.employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
 
             leaveRecord.CalculatedDeducation = calcResult.DeductionAmount;
             leaveRecord.FinalSalary = calcResult.FinalNetSalary;
             leaveRecord.Status = LeaveStatus.Approved;
-
             leaveRecord.employee.WorkStatus = (WorkStatusType)3;
 
             await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                Success = true,
-                Message = $"✅ '{leaveRecord.employee.Name}' adlı personelin izin talebi onaylandı ve maaş kesintisi işlendi!"
-            });
+            return Ok(new { Success = true, Message = $"✅ '{leaveRecord.employee.Name}' izin talebi onaylandı!" });
         }
         catch (Exception ex)
         {
@@ -348,27 +344,18 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 12. YÖNETİCİ İZİN TALEBİ REDDETME KAPISI (POST /api/personnel/reject-leave/{id})
+    // 12. YÖNETİCİ İZİN REDDETME (POST /api/personnel/reject-leave/{id})
     [HttpPost("reject-leave/{id}")]
     public async Task<IActionResult> RejectLeave(int id)
     {
         try
         {
-            var leaveRecord = await _context.leaveRecords
-                .Include(l => l.employee)
-                .FirstOrDefaultAsync(l => l.Id == id);
-
-            if (leaveRecord == null)
-                return NotFound("Reddedilecek izin kaydı bulunamadı.");
+            var leaveRecord = await _context.leaveRecords.FindAsync(id);
+            if (leaveRecord == null) return NotFound("Reddedilecek izin kaydı bulunamadı.");
 
             leaveRecord.Status = LeaveStatus.Rejected;
             await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                Success = true,
-                Message = $"🔴 #{id} numaralı izin talebi reddedildi."
-            });
+            return Ok(new { Success = true, Message = $"🔴 #{id} numaralı izin talebi reddedildi." });
         }
         catch (Exception ex)
         {
@@ -376,32 +363,20 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 13. PERSONELE İZİN BİLDİRİM NOTU GÖNDER (POST /api/personnel/send-notification)
+    // 13. BİLDİRİM NOTU GÖNDER (POST /api/personnel/send-notification)
     [HttpPost("send-notification")]
     public async Task<IActionResult> SendLeaveNotification([FromBody] LeaveNotificationRequest request)
     {
         try
         {
-            var leaveRecord = await _context.leaveRecords
-                .Include(l => l.employee)
-                .FirstOrDefaultAsync(l => l.Id == request.LeaveRecordId);
-
-            if (leaveRecord == null)
-                return NotFound("İzin kaydı bulunamadı.");
-
-            var employeeName = leaveRecord.employee != null ? leaveRecord.employee.Name : "Personel";
+            var leaveRecord = await _context.leaveRecords.Include(l => l.employee).FirstOrDefaultAsync(l => l.Id == request.LeaveRecordId);
+            if (leaveRecord == null) return NotFound("İzin kaydı bulunamadı.");
 
             return Ok(new
             {
                 Success = true,
-                Message = $"📢 Sistem içi bildirim notu '{employeeName}' için başarıyla oluşturuldu!",
-                Details = new
-                {
-                    Recipient = employeeName,
-                    LeaveRecordId = leaveRecord.Id,
-                    Note = request.MessageNote,
-                    CreatedAt = DateTime.Now.ToString("dd.MM.yyyy HH:mm")
-                }
+                Message = $"📢 Bildirim notu '{leaveRecord.employee?.Name}' için gönderildi!",
+                Details = new { Recipient = leaveRecord.employee?.Name, Note = request.MessageNote }
             });
         }
         catch (Exception ex)
@@ -410,107 +385,57 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 14. TURNİKEDEN RFID KART OKUTMA KAPISI (POST /api/personnel/swipe-card)
+    // 14. TURNİKE RFID KART OKUTMA (POST /api/personnel/swipe-card)
     [HttpPost("swipe-card")]
     public async Task<IActionResult> SwipeCard([FromBody] CardSwipeRequest request)
     {
         try
         {
             var employee = await _context.employees.FindAsync(request.EmployeeId);
-            if (employee == null)
-                return NotFound("Kart okutulan personel bulunamadı.");
+            if (employee == null) return NotFound("Kart okutulan personel bulunamadı.");
 
-            string eventType;
-            if (employee.WorkStatus != (WorkStatusType)1)
-            {
-                employee.WorkStatus = (WorkStatusType)1;
-                eventType = "Giriş Yapıldı 🟢";
-            }
-            else
-            {
-                employee.WorkStatus = (WorkStatusType)4;
-                eventType = "Çıkış Yapıldı 🔴";
-            }
+            string eventType = employee.WorkStatus != (WorkStatusType)1 ? "Giriş Yapıldı 🟢" : "Çıkış Yapıldı 🔴";
+            employee.WorkStatus = employee.WorkStatus != (WorkStatusType)1 ? (WorkStatusType)1 : (WorkStatusType)4;
 
             await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                Success = true,
-                Message = $"💳 {employee.Name} - {eventType}",
-                EmployeeId = employee.Id,
-                NewStatus = (int)employee.WorkStatus,
-                StatusLabel = employee.WorkStatus.ToString(),
-                Timestamp = DateTime.Now.ToString("dd.MM.yyyy HH:mm:ss")
-            });
+            return Ok(new { Success = true, Message = $"💳 {employee.Name} - {eventType}" });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { Message = "Kart okutma işlemi başarısız.", Error = ex.Message });
+            return StatusCode(500, new { Message = "Kart okutma başarısız.", Error = ex.Message });
         }
     }
 
-    // 15. KURUMSAL KULLANICI GİRİŞİ (POST /api/personnel/login)
+    // 15. GİRİŞ YAPMA (POST /api/personnel/login)
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
         try
         {
-            if (!await _context.employees.AnyAsync())
-            {
-                var defaultAdmin = new Employee
-                {
-                    Name = "test testtest",
-                    Department = "IT",
-                    ExperienceYears = 10,
-                    EducationLevel = "Lisans",
-                    Age = 35,
-                    Gender = "Erkek",
-                    MonthlySalary = 100000,
-                    WorkStatus = (WorkStatusType)1
-                };
-                await _context.employees.AddAsync(defaultAdmin);
-                await _context.SaveChangesAsync();
-            }
-
             Employee? employee = null;
             if (request.EmployeeId > 0)
-            {
                 employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == request.EmployeeId);
-            }
 
             if (employee == null && !string.IsNullOrWhiteSpace(request.Name))
-            {
-                var searchName = request.Name.Trim().ToLower();
-                employee = await _context.employees
-                    .FirstOrDefaultAsync(e => e.Name.ToLower().Contains(searchName));
-            }
+                employee = await _context.employees.FirstOrDefaultAsync(e => e.Name.ToLower().Contains(request.Name.Trim().ToLower()));
 
             if (employee == null)
-            {
                 employee = await _context.employees.FirstOrDefaultAsync();
-            }
 
             if (employee == null)
-                return NotFound(new { Message = "Sistemde kayıtlı personel bulunamadı." });
+                return NotFound(new { Message = "Sistemde personel bulunamadı." });
 
-            var adminDepartments = new[] { "yönetim", "yonetim", "ik", "it", "yönetici", "yonetici", "ik & yönetim" };
-            string userRole = (employee.Id == 1 || adminDepartments.Contains(employee.Department.Trim().ToLower()))
-                ? "Admin"
-                : "Employee";
+            // 🛡️ ESNEK DEPARTMAN / UNVAN KONTROLÜ (Yönetim, Kurul, İK, IT, CEO vb.)
+            var dept = (employee.Department ?? "").Trim().ToLower();
+            var adminKeywords = new[] { "yönetim", "yonetim", "kurul", "insan kaynakları", "ik", "it", "yönetici", "yonetici", "direktör", "direktor", "ceo" };
+
+            string userRole = adminKeywords.Any(k => dept.Contains(k)) ? "Admin" : "Employee";
 
             return Ok(new
             {
                 Success = true,
                 Message = $"🔑 Hoş geldiniz, {employee.Name}!",
-                Employee = new
-                {
-                    Id = employee.Id,
-                    Name = employee.Name,
-                    Department = employee.Department,
-                    Role = userRole,
-                    WorkStatus = (int)employee.WorkStatus
-                }
+                Employee = new { Id = employee.Id, Name = employee.Name, Department = employee.Department, Role = userRole, WorkStatus = (int)employee.WorkStatus }
             });
         }
         catch (Exception ex)
@@ -519,128 +444,256 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 16. SAHTE TEST VERİSETİNİ VERİTABANINA YÜKLE (POST /api/personnel/seed-data)
-    [HttpPost("seed-data")]
-    public async Task<IActionResult> SeedTestData()
-    {
-        try
-        {
-            if (await _context.employees.AnyAsync(e => e.Name == "Ahmet Yılmaz (CEO)"))
-                return BadRequest("Sahte test verileri zaten veritabanında mevcut.");
-
-            var testEmployees = new List<Employee>
-            {
-                new Employee { Name = "Ahmet Yılmaz (CEO)", Department = "Yönetim", ExperienceYears = 15, EducationLevel = "Doktora", Age = 45, Gender = "Erkek", MonthlySalary = 120000, WorkStatus = (WorkStatusType)1 },
-                new Employee { Name = "Ayşe Kaya (İK Müdürü)", Department = "İK", ExperienceYears = 10, EducationLevel = "Yüksek Lisans", Age = 38, Gender = "Kadın", MonthlySalary = 85000, WorkStatus = (WorkStatusType)1 },
-                new Employee { Name = "Mehmet Demir (IT Lideri)", Department = "IT", ExperienceYears = 8, EducationLevel = "Lisans", Age = 32, Gender = "Erkek", MonthlySalary = 75000, WorkStatus = (WorkStatusType)2 },
-                new Employee { Name = "Zeynep Arslan (Yazılımcı)", Department = "Yazılım", ExperienceYears = 3, EducationLevel = "Lisans", Age = 26, Gender = "Kadın", MonthlySalary = 48000, WorkStatus = (WorkStatusType)1 },
-                new Employee { Name = "Can Öztürk (Pazarlama)", Department = "Pazarlama", ExperienceYears = 4, EducationLevel = "Lisans", Age = 28, Gender = "Erkek", MonthlySalary = 42000, WorkStatus = (WorkStatusType)4 }
-            };
-
-            await _context.employees.AddRangeAsync(testEmployees);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { Success = true, Message = "🌱 5 adet zengin örnek test personeli veritabanına başarıyla yüklendi!" });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { Message = "Test verileri yüklenemedi.", Error = ex.Message });
-        }
-    }
-
-    // 17. YÖNETİCİ İZİN İPTAL ETME KAPISI (DELETE /api/personnel/cancel-leave/{id})
-    [HttpDelete("cancel-leave/{id}")]
-    public async Task<IActionResult> CancelLeave(int id)
-    {
-        try
-        {
-            var leaveRecord = await _context.leaveRecords
-                .Include(l => l.employee)
-                .FirstOrDefaultAsync(l => l.Id == id);
-
-            if (leaveRecord == null)
-                return NotFound("İptal edilecek izin kaydı bulunamadı.");
-
-            var employeeName = leaveRecord.employee != null ? leaveRecord.employee.Name : "Personel";
-
-            _context.leaveRecords.Remove(leaveRecord);
-
-            if (leaveRecord.employee != null && leaveRecord.employee.WorkStatus == (WorkStatusType)3)
-            {
-                leaveRecord.employee.WorkStatus = (WorkStatusType)1;
-            }
-
-            await _context.SaveChangesAsync();
-
-            return Ok(new
-            {
-                Success = true,
-                Message = $"🗑️ '{employeeName}' adlı personelin #{id} numaralı izin kaydı başarıyla iptal edildi ve maaş kesintisi kaldırıldı!"
-            });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { Message = "İzin kaydı iptal edilemedi.", Error = ex.Message });
-        }
-    }
-
-    // 18. EXCEL / CSV DOSYASINDAN TOPLU PERSONEL YÜKLE (POST /api/personnel/import-csv)
+    // 16. EXCEL / CSV PERSONEL YÜKLE (POST /api/personnel/import-csv)
     [HttpPost("import-csv")]
     public async Task<IActionResult> ImportCsv(IFormFile file)
     {
         try
         {
-            if (file == null || file.Length == 0)
-                return BadRequest(new { Message = "Lütfen geçerli bir CSV veya Excel dosyası seçiniz." });
-
+            if (file == null || file.Length == 0) return BadRequest("Geçersiz dosya.");
             var newEmployees = new List<Employee>();
 
             using (var reader = new StreamReader(file.OpenReadStream()))
             {
-                string? headerLine = await reader.ReadLineAsync(); // Header satırını atla
+                await reader.ReadLineAsync();
                 string? line;
                 while ((line = await reader.ReadLineAsync()) != null)
                 {
                     if (string.IsNullOrWhiteSpace(line)) continue;
+                    char sep = line.Contains(';') ? ';' : ',';
+                    var p = line.Split(sep);
+                    if (p.Length < 8) continue;
 
-                    // Hem virgül (,) hem noktalı virgül (;) otomatik algılama
-                    char separator = line.Contains(';') ? ';' : ',';
-                    var parts = line.Split(separator);
-
-                    if (parts.Length < 8) continue;
-
-                    var emp = new Employee
+                    newEmployees.Add(new Employee
                     {
-                        Name = parts[0].Trim(),
-                        Department = parts[1].Trim(),
-                        ExperienceYears = int.TryParse(parts[2].Trim(), out int exp) ? exp : 0,
-                        EducationLevel = string.IsNullOrWhiteSpace(parts[3].Trim()) ? "Lisans" : parts[3].Trim(),
-                        Age = int.TryParse(parts[4].Trim(), out int age) ? age : 25,
-                        Gender = string.IsNullOrWhiteSpace(parts[5].Trim()) ? "Belirtilmedi" : parts[5].Trim(),
-                        MonthlySalary = decimal.TryParse(parts[6].Trim(), out decimal sal) ? sal : 40000,
-                        WorkStatus = (WorkStatusType)(int.TryParse(parts[7].Trim(), out int status) ? status : 1)
-                    };
-
-                    newEmployees.Add(emp);
+                        Name = p[0].Trim(),
+                        Department = p[1].Trim(),
+                        ExperienceYears = int.TryParse(p[2].Trim(), out int exp) ? exp : 0,
+                        EducationLevel = p[3].Trim(),
+                        Age = int.TryParse(p[4].Trim(), out int age) ? age : 25,
+                        Gender = p[5].Trim(),
+                        MonthlySalary = decimal.TryParse(p[6].Trim(), out decimal sal) ? sal : 40000,
+                        WorkStatus = (WorkStatusType)(int.TryParse(p[7].Trim(), out int st) ? st : 1)
+                    });
                 }
             }
 
-            if (newEmployees.Count == 0)
-                return BadRequest(new { Message = "Dosyadan okunabilir personel verisi çıkarılamadı." });
-
             await _context.employees.AddRangeAsync(newEmployees);
             await _context.SaveChangesAsync();
+            return Ok(new { Success = true, Message = $"✅ {newEmployees.Count} personel eklendi." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "CSV yüklenemedi.", Error = ex.Message });
+        }
+    }
+
+    // 17. EXCEL İZİN DÖKÜMÜ (GET /api/personnel/export-leaves-csv)
+    [HttpGet("export-leaves-csv")]
+    public async Task<IActionResult> ExportLeavesCsv()
+    {
+        try
+        {
+            var leaves = await _context.leaveRecords.Include(l => l.employee).Where(l => l.Status == LeaveStatus.Approved).ToListAsync();
+            var builder = new System.Text.StringBuilder();
+            builder.AppendLine("Kayıt ID,Personel Adı,Departman,İzin Türü,Başlangıç,Bitiş,İzin Günü,Taban Maaş,Kesinti,Net Maaş,Açıklama");
+
+            foreach (var l in leaves)
+            {
+                builder.AppendLine($"{l.Id},{l.employee?.Name},{l.employee?.Department},{l.LeaveType},{l.StartDate:dd.MM.yyyy},{l.EndDate:dd.MM.yyyy},{l.LeaveDays},{l.employee?.MonthlySalary},{l.CalculatedDeducation},{l.FinalSalary},{l.Note}");
+            }
+
+            var bytes = System.Text.Encoding.UTF8.GetPreamble().Concat(System.Text.Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
+            return File(bytes, "text/csv; charset=utf-8", "Izin_Dokumu.csv");
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "İzin dökümü indirilemedi.", Error = ex.Message });
+        }
+    }
+
+    // 18. AVANS/MASRAF TALEBİ OLUŞTUR (POST /api/personnel/request-advance-expense)
+    [HttpPost("request-advance-expense")]
+    public async Task<IActionResult> RequestAdvanceExpense([FromBody] AdvanceExpenseRecord record)
+    {
+        try
+        {
+            var employee = await _context.employees.FindAsync(record.employeeId);
+            if (employee == null) return NotFound("Personel bulunamadı.");
+
+            record.Status = RequestStatusType.Pending;
+            record.RequestDate = DateTime.Now;
+
+            await _context.advanceExpenseRecords.AddAsync(record);
+            await _context.SaveChangesAsync();
+            return Ok(new { Success = true, Message = "⏳ Talep oluşturuldu!", Record = record });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Talep oluşturulamadı.", Error = ex.Message });
+        }
+    }
+
+    // 19. BEKLEYEN AVANSLAR (GET /api/personnel/pending-advances)
+    [HttpGet("pending-advances")]
+    public async Task<IActionResult> GetPendingAdvances()
+    {
+        try
+        {
+            var pending = await _context.advanceExpenseRecords.Include(a => a.employee).Where(a => a.Status == RequestStatusType.Pending).ToListAsync();
+            return Ok(pending);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Bekleyen avanslar alınamadı.", Error = ex.Message });
+        }
+    }
+
+    // 20. AVANS ONAYLA (POST /api/personnel/approve-advance/{id})
+    [HttpPost("approve-advance/{id}")]
+    public async Task<IActionResult> ApproveAdvanceExpense(int id)
+    {
+        try
+        {
+            var record = await _context.advanceExpenseRecords.FindAsync(id);
+            if (record == null) return NotFound("Talep bulunamadı.");
+
+            record.Status = RequestStatusType.Approved;
+            await _context.SaveChangesAsync();
+            return Ok(new { Success = true, Message = "✅ Talep onaylandı!" });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Talep onaylanamadı.", Error = ex.Message });
+        }
+    }
+
+    // 21. AVANS REDDET (POST /api/personnel/reject-advance/{id})
+    [HttpPost("reject-advance/{id}")]
+    public async Task<IActionResult> RejectAdvanceExpense(int id)
+    {
+        try
+        {
+            var record = await _context.advanceExpenseRecords.FindAsync(id);
+            if (record == null) return NotFound("Talep bulunamadı.");
+
+            record.Status = RequestStatusType.Rejected;
+            await _context.SaveChangesAsync();
+            return Ok(new { Success = true, Message = "🔴 Talep reddedildi." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Talep reddedilemedi.", Error = ex.Message });
+        }
+    }
+
+    // 22. DUYURULARI GETİR (GET /api/personnel/announcements)
+    [HttpGet("announcements")]
+    public async Task<IActionResult> GetAnnouncements()
+    {
+        try
+        {
+            var list = await _context.announcements.Where(a => a.IsActive).OrderByDescending(a => a.CreatedAt).ToListAsync();
+            return Ok(list);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Duyurular alınamadı.", Error = ex.Message });
+        }
+    }
+
+    // 23. DUYURU YAYINLA (POST /api/personnel/announcements)
+    [HttpPost("announcements")]
+    public async Task<IActionResult> CreateAnnouncement([FromBody] Announcement announcement)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(announcement.Title) || string.IsNullOrWhiteSpace(announcement.Content))
+                return BadRequest(new { Message = "Duyuru başlığı ve içeriği boş olamaz." });
+
+            announcement.CreatedAt = DateTime.Now;
+            announcement.IsActive = true;
+
+            await _context.announcements.AddAsync(announcement);
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Success = true, Message = $"📢 '{announcement.Title}' duyurusu yayınlandı!", Announcement = announcement });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Duyuru yayınlanamadı.", Error = ex.Message });
+        }
+    }
+
+    // 24. DUYURU SİL (DELETE /api/personnel/announcements/{id})
+    [HttpDelete("announcements/{id}")]
+    public async Task<IActionResult> DeleteAnnouncement(int id)
+    {
+        try
+        {
+            var item = await _context.announcements.FindAsync(id);
+            if (item == null) return NotFound("Duyuru bulunamadı.");
+
+            _context.announcements.Remove(item);
+            await _context.SaveChangesAsync();
+            return Ok(new { Success = true, Message = "🗑️ Duyuru silindi." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { Message = "Duyuru silinemedi.", Error = ex.Message });
+        }
+    }
+
+    // 25. RESMİ BORDRO ZARFI VERİ KAPISI (GET /api/personnel/payslip/{leaveId})
+    [HttpGet("payslip/{leaveId}")]
+    public async Task<IActionResult> GetPayslipData(int leaveId)
+    {
+        try
+        {
+            var leave = await _context.leaveRecords
+                .Include(l => l.employee)
+                .FirstOrDefaultAsync(l => l.Id == leaveId);
+
+            if (leave == null || leave.employee == null)
+                return NotFound(new { Message = "Bordro çıkarılacak izin kaydı bulunamadı." });
+
+            var emp = leave.employee;
+
+            var advanceDeductions = await _context.advanceExpenseRecords
+                .Where(a => a.employeeId == emp.Id && a.Type == RequestCategoryType.Advance && a.Status == RequestStatusType.Approved)
+                .SumAsync(a => a.Amount);
+
+            decimal grossSalary = emp.MonthlySalary;
+            decimal leaveDeduction = leave.CalculatedDeducation;
+            decimal netSalary = grossSalary - leaveDeduction - advanceDeductions;
 
             return Ok(new
             {
                 Success = true,
-                Message = $"✅ {newEmployees.Count} adet personel başarıyla veritabanına aktarıldı ve sisteme işlendi!",
-                TotalImported = newEmployees.Count
+                PayslipNo = $"BRD-{DateTime.Now:yyyyMM}-{leave.Id:D4}",
+                IssueDate = DateTime.Now.ToString("dd.MM.yyyy"),
+                Employee = new
+                {
+                    Id = emp.Id,
+                    Name = emp.Name,
+                    Department = emp.Department,
+                    ExperienceYears = emp.ExperienceYears
+                },
+                PayrollDetails = new
+                {
+                    GrossSalary = grossSalary,
+                    DailyWage = Math.Round(grossSalary / 30m, 2),
+                    LeaveDays = leave.LeaveDays,
+                    LeaveType = leave.LeaveType.ToString(),
+                    LeaveDeduction = leaveDeduction,
+                    AdvanceDeduction = advanceDeductions,
+                    NetPayableSalary = netSalary > 0 ? netSalary : 0
+                }
             });
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { Message = "CSV yükleme işlemi başarısız.", Error = ex.Message });
+            return StatusCode(500, new { Message = "Bordro verisi hazırlanamadı.", Error = ex.Message });
         }
     }
 }
