@@ -159,8 +159,16 @@ Sistemde ayrı bir kimlik doğrulama/parola mekanizması bulunmamaktadır. Giri�
 
 - Parola tabanlı kimlik doğrulama yok.
 - `appsettings.json` içindeki SQL Server bağlantı dizesi ile `Program.cs` içindeki SQLite yapılandırması senkron değil.
+<<<<<<< HEAD
+=======
+- `erp.db` veritabanı dosyası depoda takip ediliyorsa (`.gitignore` içeriğini kontrol edin), üretim verisiyle karışmaması için deponuzdan çıkarmanız önerilir.
+>>>>>>> 00c7e6fb62756781c010a2e1ffbf9538f230bfb7
 - Otomatik test (unit/integration test) bulunmuyor.
 
 ## Lisans
 
+<<<<<<< HEAD
 Bu proje [MIT Lisansı](LICENSE) ile lisanslanmıştır.
+=======
+Bu proje için bir lisans belirtilmemiştir. Depoya bir `LICENSE` dosyası ekleyerek (ör. MIT) kullanım koşullarını netleştirebilirsiniz.
+>>>>>>> 00c7e6fb62756781c010a2e1ffbf9538f230bfb7
