@@ -8,6 +8,9 @@ public class Announcement
     public int Id { get; set; }
 
     [Required]
+    public int CompanyId { get; set; }
+
+    [Required]
     [MaxLength(150)]
     public string Title { get; set; } = string.Empty;
 

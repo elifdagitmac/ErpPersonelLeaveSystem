@@ -25,6 +25,7 @@ let currentCalDate = new Date();
 
 const THEME_STORAGE_KEY = "erp-theme";
 const USER_STORAGE_KEY = "erp-current-user";
+const TOKEN_STORAGE_KEY = "erp-auth-token";
 
 function applyTheme(theme) {
     if (theme === "light") {
@@ -89,7 +90,21 @@ function setStatus(elementId, message, type) {
 
 async function apiFetch(url, options) {
     try {
-        const response = await fetch(url, options);
+        const token = localStorage.getItem(TOKEN_STORAGE_KEY);
+        const finalOptions = { ...(options || {}) };
+        if (token) {
+            finalOptions.headers = { ...(finalOptions.headers || {}), Authorization: `Bearer ${token}` };
+        }
+
+        const response = await fetch(url, finalOptions);
+
+        if (response.status === 401 && token) {
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
+            localStorage.removeItem(USER_STORAGE_KEY);
+            location.reload();
+            throw new Error("Oturum süresi doldu, lütfen tekrar giriş yapın.");
+        }
+
         if (!response.ok) {
             let detail = "";
             const rawText = await response.text();
@@ -113,18 +128,11 @@ async function apiFetch(url, options) {
 function initAuth() {
     const loginForm = document.getElementById("loginForm");
     const loginModal = document.getElementById("loginModal");
-    const closeLoginBtn = document.getElementById("closeLoginModalBtn");
-
-    if (closeLoginBtn && loginModal) {
-        closeLoginBtn.addEventListener("click", () => {
-            loginModal.style.display = "none";
-            loginModal.hidden = true;
-        });
-    }
 
     const storedUser = localStorage.getItem(USER_STORAGE_KEY);
+    const storedToken = localStorage.getItem(TOKEN_STORAGE_KEY);
 
-    if (storedUser) {
+    if (storedUser && storedToken) {
         try {
             currentUser = JSON.parse(storedUser);
             if (loginModal) {
@@ -134,6 +142,7 @@ function initAuth() {
             applyUserPermissions();
         } catch {
             localStorage.removeItem(USER_STORAGE_KEY);
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
             currentUser = null;
             if (loginModal) loginModal.style.display = "flex";
         }
@@ -146,70 +155,58 @@ function initAuth() {
         loginForm.addEventListener("submit", async (e) => {
             e.preventDefault();
 
-            const nameInp = document.getElementById("loginName");
+            const companyCodeInp = document.getElementById("loginCompanyCode");
             const empIdInp = document.getElementById("loginEmpId");
+            const passwordInp = document.getElementById("loginPassword");
 
-            const name = nameInp && nameInp.value ? nameInp.value.trim() : "";
-            const empId = Number(empIdInp && empIdInp.value ? empIdInp.value : 0);
+            const companyCode = companyCodeInp && companyCodeInp.value ? companyCodeInp.value.trim() : "";
+            const identifier = empIdInp && empIdInp.value ? empIdInp.value.trim() : "";
+            const password = passwordInp && passwordInp.value ? passwordInp.value : "";
 
             try {
-                const response = await apiFetch(`${API_BASE}/login`, {
+                const response = await apiFetch(`/api/auth/login`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ EmployeeId: empId, Name: name })
+                    body: JSON.stringify({ CompanyCode: companyCode, EmployeeIdOrEmail: identifier, Password: password })
                 });
 
-                if (response && response.employee) {
-                    const empDept = (response.employee.department || response.employee.Department || "").toLowerCase();
-                    const adminKeywords = ["yönetim", "yonetim", "kurul", "insan kaynakları", "ik", "it", "yönetici", "yonetici", "direktör", "direktor", "ceo"];
-                    const isDeptAdmin = adminKeywords.some(k => empDept.includes(k));
+                currentUser = {
+                    Id: response.employee.id,
+                    Name: response.employee.name,
+                    Department: response.employee.department,
+                    Role: response.employee.role,
+                    WorkStatus: response.employee.workStatus,
+                    CompanyId: response.employee.companyId,
+                    CompanyName: response.employee.companyName,
+                    CompanyCode: response.employee.companyCode
+                };
 
-                    currentUser = {
-                        Id: response.employee.id || response.employee.Id,
-                        Name: response.employee.name || response.employee.Name,
-                        Department: response.employee.department || response.employee.Department,
-                        Role: isDeptAdmin ? "Admin" : (response.employee.role || response.employee.Role || "Employee"),
-                        WorkStatus: response.employee.workStatus || response.employee.WorkStatus || 1
-                    };
-                } else {
-                    currentUser = {
-                        Id: empId || 1,
-                        Name: name || "Kullanıcı",
-                        Department: "Yazılım",
-                        Role: "Employee",
-                        WorkStatus: 1
-                    };
+                localStorage.setItem(TOKEN_STORAGE_KEY, response.token);
+                localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
+
+                if (loginModal) {
+                    loginModal.style.display = "none";
+                    loginModal.hidden = true;
+                }
+
+                applyUserPermissions();
+                showToast(`🔑 Hoş geldiniz, ${currentUser.Name}! (${currentUser.Role === 'Admin' ? 'Yönetici' : 'Çalışan'})`, "success");
+
+                try {
+                    await loadEmployees();
+                    await loadLeaves();
+                    if (currentUser.Role === "Admin") {
+                        await loadPendingLeaves();
+                        await loadPendingAdvances();
+                    }
+                    await loadAnnouncements();
+                    renderCalendarGrid();
+                } catch (err) {
+                    console.warn("Arka plan verileri bekleniyor:", err);
                 }
             } catch (err) {
-                console.warn("Giriş API hatası, varsayılan rol atanıyor:", err);
-                currentUser = {
-                    Id: empId || 1,
-                    Name: name || "Kullanıcı",
-                    Department: "Yazılım",
-                    Role: "Employee",
-                    WorkStatus: 1
-                };
-            }
-
-            localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(currentUser));
-
-            if (loginModal) {
-                loginModal.style.display = "none";
-                loginModal.hidden = true;
-            }
-
-            applyUserPermissions();
-            showToast(`🔑 Hoş geldiniz, ${currentUser.Name}! (${currentUser.Role === 'Admin' ? 'Yönetici' : 'Çalışan'})`, "success");
-
-            try {
-                await loadEmployees();
-                await loadLeaves();
-                await loadPendingLeaves();
-                await loadPendingAdvances();
-                await loadAnnouncements();
-                renderCalendarGrid();
-            } catch (err) {
-                console.warn("Arka plan verileri bekleniyor:", err);
+                setStatus("loginFormStatus", err.message || "Giriş başarısız.", "error");
+                showToast(err.message || "Giriş başarısız.", "error");
             }
         });
     }
@@ -272,6 +269,7 @@ function applyUserPermissions() {
 
         document.getElementById("logoutBtn")?.addEventListener("click", () => {
             localStorage.removeItem(USER_STORAGE_KEY);
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
             location.reload();
         });
     }
@@ -1080,8 +1078,15 @@ function openEmployeeModal(employee) {
     if (empGender) empGender.required = !isEdit;
     if (empEditNote) empEditNote.hidden = !isEdit;
 
+    const empPasswordField = document.getElementById("empPasswordField");
+    const empPasswordInput = document.getElementById("empPassword");
+    if (empPasswordInput) {
+        empPasswordInput.placeholder = isEdit ? "Değiştirmek istemiyorsanız boş bırakın" : "Boş bırakılırsa şifre = Personel ID";
+    }
+
     if (isEdit) {
         document.getElementById("empName").value = employee.name || employee.Name || "";
+        document.getElementById("empEmail").value = employee.email || employee.Email || "";
         document.getElementById("empDepartment").value = employee.department || employee.Department || "";
         document.getElementById("empExperience").value = employee.experienceYears !== undefined ? employee.experienceYears : (employee.ExperienceYears || 0);
         document.getElementById("empAge").value = employee.age !== undefined ? employee.age : (employee.Age || 25);
@@ -1127,8 +1132,11 @@ function initEmployeeModal() {
             const empEduEl = document.getElementById("empEducation");
             const empGenderEl = document.getElementById("empGender");
 
+            const password = document.getElementById("empPassword").value;
+
             const payload = {
                 Name: document.getElementById("empName").value.trim(),
+                Email: document.getElementById("empEmail").value.trim(),
                 Department: document.getElementById("empDepartment").value.trim(),
                 ExperienceYears: Number(document.getElementById("empExperience").value) || 0,
                 EducationLevel: isEdit ? "Lisans" : (empEduEl && empEduEl.value ? empEduEl.value : "Lisans"),
@@ -1137,6 +1145,8 @@ function initEmployeeModal() {
                 MonthlySalary: Number(document.getElementById("empSalary").value) || 0,
                 WorkStatus: Number(document.getElementById("empWorkStatus").value) || 1,
             };
+
+            if (password) payload.Password = password;
 
             const submitBtn = document.getElementById("submitEmployeeBtn");
             if (submitBtn) submitBtn.disabled = true;

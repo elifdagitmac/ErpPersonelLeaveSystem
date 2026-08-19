@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Süper Admin | ErpPersonnel</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+
+    <link rel="stylesheet" href="Style.css" />
+</head>
+<body>
+
+    <div class="bg-decor" aria-hidden="true"></div>
+
+    <header class="topbar">
+        <div class="topbar-inner">
+            <div class="brand">
+                <span class="brand-icon"><i class="fa-solid fa-crown"></i></span>
+                <div>
+                    <h1>Süper Admin <span class="brand-divider">|</span> Şirket Yönetim Paneli</h1>
+                    <p>Sisteme kayıtlı tüm şirketleri (tenant) buradan yönetin</p>
+                </div>
+            </div>
+
+            <div class="topbar-actions">
+                <button id="themeToggle" class="theme-toggle" type="button" aria-label="Temayı değiştir">
+                    <i class="fa-solid fa-sun theme-icon-sun"></i>
+                    <i class="fa-solid fa-moon theme-icon-moon"></i>
+                </button>
+                <button id="openAddCompanyModal" class="btn btn-primary" type="button" style="display:none;">
+                    <i class="fa-solid fa-building-circle-plus"></i>
+                    Yeni Şirket Ekle
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="content">
+        <section id="companiesPanel" class="tab-panel active" style="display:none;">
+            <div class="panel-title-row">
+                <h2><i class="fa-solid fa-building"></i> Kayıtlı Şirketler</h2>
+            </div>
+
+            <div class="table-wrapper glass">
+                <table id="companiesTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Şirket Kodu</th>
+                            <th>Şirket Adı</th>
+                            <th>Admin E-Posta</th>
+                            <th>Lisans Durumu</th>
+                            <th>Oluşturulma</th>
+                            <th>İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody id="companiesTableBody"></tbody>
+                </table>
+                <p id="emptyCompaniesMsg" class="empty-msg" hidden>Henüz kayıtlı şirket bulunmuyor.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- ============ SÜPER ADMİN GİRİŞ MODAL ============ -->
+    <div id="saLoginModal" class="modal-overlay" style="display: flex;">
+        <div class="modal glass" style="max-width: 420px; width: 90%; margin: auto;">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-crown"></i> Süper Admin Girişi</h3>
+            </div>
+
+            <form id="saLoginForm">
+                <div class="form-grid" style="grid-template-columns: 1fr; gap: 15px;">
+                    <div class="form-field">
+                        <label for="saEmail">E-Posta</label>
+                        <input id="saEmail" type="email" required />
+                    </div>
+                    <div class="form-field">
+                        <label for="saPassword">Şifre</label>
+                        <input id="saPassword" type="password" required />
+                    </div>
+                </div>
+
+                <div id="saLoginStatus" class="status-msg"></div>
+
+                <div class="form-actions" style="margin-top: 20px;">
+                    <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+                        <i class="fa-solid fa-key"></i> Giriş Yap
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ============ YENİ ŞİRKET EKLE MODAL ============ -->
+    <div id="companyModal" class="modal-overlay" hidden>
+        <div class="modal glass">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-building-circle-plus"></i> Yeni Şirket Ekle</h3>
+                <button class="modal-close" id="closeCompanyModal" type="button" aria-label="Kapat">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="companyForm">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label for="coCode">Şirket Kodu</label>
+                        <input id="coCode" type="text" required maxlength="20" placeholder="Örn. APEX" />
+                    </div>
+                    <div class="form-field">
+                        <label for="coName">Şirket Adı</label>
+                        <input id="coName" type="text" required maxlength="150" />
+                    </div>
+                    <div class="form-field">
+                        <label for="coAdminEmail">Yönetici E-Postası</label>
+                        <input id="coAdminEmail" type="email" required maxlength="150" />
+                    </div>
+                    <div class="form-field">
+                        <label for="coAdminName">Yönetici Adı Soyadı</label>
+                        <input id="coAdminName" type="text" maxlength="100" placeholder="Şirket Yöneticisi" />
+                    </div>
+                    <div class="form-field span-2">
+                        <label for="coMasterPassword">Yönetici Şifresi (Master Password)</label>
+                        <input id="coMasterPassword" type="password" required minlength="6" />
+                    </div>
+                </div>
+
+                <div id="companyFormStatus" class="status-msg"></div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelCompanyModal">Vazgeç</button>
+                    <button type="submit" class="btn btn-primary" id="submitCompanyBtn">
+                        <i class="fa-solid fa-floppy-disk"></i> Kaydet
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="superadmin.js"></script>
+</body>
+</html>

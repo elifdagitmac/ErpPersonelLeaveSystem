@@ -3,18 +3,33 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Data.Common;
+using System.Text.Json.Serialization;
 
 namespace ErpPersonelLeaveSystem.models
 {
     
     public class Employee
     {
-        [Key] 
+        [Key]
         public int Id { get; set; }
+
+        [Required]
+        public int CompanyId { get; set; }
 
         [Required]
         [StringLength(100)]
         public string Name { get; set; } = string.Empty;
+
+        [StringLength(150)]
+        public string? Email { get; set; }
+
+        [JsonIgnore]
+        public string PasswordHash { get; set; } = string.Empty;
+
+        // Sadece istek gövdesinde gelen düz metin şifreyi taşır, veritabanına yazılmaz, yanıtlarda dönmez.
+        [NotMapped]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public string? Password { get; set; }
 
         [Required]
         [StringLength(100)]

@@ -1,6 +1,8 @@
-﻿using ErpPersonelLeaveSystem.Data;
+using ErpPersonelLeaveSystem.Data;
 using ErpPersonelLeaveSystem.models;
 using ErpPersonelLeaveSystem.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -12,12 +14,6 @@ public class CardSwipeRequest
     public string CardUid { get; set; } = string.Empty;
 }
 
-public class LoginRequest
-{
-    public int EmployeeId { get; set; }
-    public string? Name { get; set; }
-}
-
 public class LeaveNotificationRequest
 {
     public int LeaveRecordId { get; set; }
@@ -26,16 +22,24 @@ public class LeaveNotificationRequest
 
 [ApiController]
 [Route("api/personnel")]
+[Authorize]
 public class PersonnelController : ControllerBase
 {
     private readonly ErpDbContext _context;
     private readonly ILeaveCalculationService _calculationService;
+    private readonly ICurrentTenantService _tenant;
+    private readonly PasswordHasher<Employee> _passwordHasher = new();
 
-    public PersonnelController(ErpDbContext context, ILeaveCalculationService calculationService)
+    public PersonnelController(ErpDbContext context, ILeaveCalculationService calculationService, ICurrentTenantService tenant)
     {
         _context = context;
         _calculationService = calculationService;
+        _tenant = tenant;
     }
+
+    private int CompanyId => _tenant.CompanyId ?? 0;
+    private int CurrentEmployeeId => _tenant.EmployeeId ?? 0;
+    private bool IsAdmin => _tenant.Role == "Admin";
 
     // 1. TÜM PERSONELLERİ GETİR (GET /api/personnel)
     [HttpGet]
@@ -58,7 +62,7 @@ public class PersonnelController : ControllerBase
     {
         try
         {
-            var employee = await _context.employees.FindAsync(id);
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == id);
             if (employee == null)
                 return NotFound("Personel bulunamadı.");
 
@@ -72,6 +76,7 @@ public class PersonnelController : ControllerBase
 
     // 3. YENİ PERSONEL EKLE (POST /api/personnel)
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreatePersonnel([FromBody] Employee employee)
     {
         try
@@ -79,8 +84,21 @@ public class PersonnelController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
+            employee.CompanyId = CompanyId;
+
+            // Admin bir şifre belirlemezse varsayılan şifre, personelin ID'si olarak atanır (kayıttan sonra belli olur).
+            var explicitPassword = employee.Password;
+            employee.PasswordHash = _passwordHasher.HashPassword(employee, string.IsNullOrWhiteSpace(explicitPassword) ? "temp" : explicitPassword);
+            employee.Password = null;
+
             await _context.employees.AddAsync(employee);
             await _context.SaveChangesAsync();
+
+            if (string.IsNullOrWhiteSpace(explicitPassword))
+            {
+                employee.PasswordHash = _passwordHasher.HashPassword(employee, employee.Id.ToString());
+                await _context.SaveChangesAsync();
+            }
 
             return Ok(employee);
         }
@@ -92,11 +110,12 @@ public class PersonnelController : ControllerBase
 
     // 4. PERSONEL BİLGİLERİNİ GÜNCELLE (PUT /api/personnel/{id})
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdatePersonnel(int id, [FromBody] Employee updatedEmployee)
     {
         try
         {
-            var existingEmployee = await _context.employees.FindAsync(id);
+            var existingEmployee = await _context.employees.FirstOrDefaultAsync(e => e.Id == id);
             if (existingEmployee == null)
                 return NotFound("Güncellenecek personel bulunamadı.");
 
@@ -106,6 +125,10 @@ public class PersonnelController : ControllerBase
             existingEmployee.ExperienceYears = updatedEmployee.ExperienceYears;
             existingEmployee.Age = updatedEmployee.Age;
             existingEmployee.WorkStatus = updatedEmployee.WorkStatus;
+            existingEmployee.Email = updatedEmployee.Email;
+
+            if (!string.IsNullOrWhiteSpace(updatedEmployee.Password))
+                existingEmployee.PasswordHash = _passwordHasher.HashPassword(existingEmployee, updatedEmployee.Password);
 
             await _context.SaveChangesAsync();
             return Ok(existingEmployee);
@@ -118,11 +141,12 @@ public class PersonnelController : ControllerBase
 
     // 5. PERSONEL SİL (DELETE /api/personnel/{id})
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeletePersonnel(int id)
     {
         try
         {
-            var employee = await _context.employees.FindAsync(id);
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == id);
             if (employee == null)
                 return NotFound("Silinecek personel bulunamadı.");
 
@@ -157,9 +181,14 @@ public class PersonnelController : ControllerBase
     {
         try
         {
-            var leaves = await _context.leaveRecords
+            var query = _context.leaveRecords
                 .Include(l => l.employee)
-                .Where(l => l.Status == LeaveStatus.Approved)
+                .Where(l => l.Status == LeaveStatus.Approved);
+
+            if (!IsAdmin)
+                query = query.Where(l => l.employeeId == CurrentEmployeeId);
+
+            var leaves = await query
                 .Select(l => new
                 {
                     l.Id,
@@ -187,16 +216,18 @@ public class PersonnelController : ControllerBase
 
     // 8. DOĞRUDAN İZİN EKLE (POST /api/personnel/add-leave)
     [HttpPost("add-leave")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> AddLeaveRecord([FromBody] LeaveRecord leaveRecord)
     {
         try
         {
-            var employee = await _context.employees.FindAsync(leaveRecord.employeeId);
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == leaveRecord.employeeId);
             if (employee == null)
                 return NotFound("İzin verilecek personel bulunamadı.");
 
             var calcResult = _calculationService.CalculatePayroll(employee.MonthlySalary, leaveRecord.LeaveType, leaveRecord.LeaveDays);
 
+            leaveRecord.CompanyId = CompanyId;
             leaveRecord.CalculatedDeducation = calcResult.DeductionAmount;
             leaveRecord.FinalSalary = calcResult.FinalNetSalary;
             leaveRecord.Status = LeaveStatus.Approved;
@@ -220,7 +251,10 @@ public class PersonnelController : ControllerBase
     {
         try
         {
-            var employee = await _context.employees.FindAsync(leaveRecord.employeeId);
+            if (!IsAdmin)
+                leaveRecord.employeeId = CurrentEmployeeId;
+
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == leaveRecord.employeeId);
             if (employee == null)
                 return NotFound(new { Message = "İzin isteyecek personel bulunamadı." });
 
@@ -266,6 +300,7 @@ public class PersonnelController : ControllerBase
                 return BadRequest(new { Message = $"❌ İzin talebi reddedildi! '{employee.Department}' departmanında iş devamlılığı için en az 2 aktif personel bulunmalıdır." });
             }
 
+            leaveRecord.CompanyId = CompanyId;
             leaveRecord.Status = LeaveStatus.Pending;
             leaveRecord.CalculatedDeducation = 0;
             leaveRecord.FinalSalary = employee.MonthlySalary;
@@ -288,6 +323,7 @@ public class PersonnelController : ControllerBase
 
     // 10. BEKLEYEN İZİN TALEPLERİ (GET /api/personnel/pending-leaves)
     [HttpGet("pending-leaves")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> GetPendingLeaves()
     {
         try
@@ -321,6 +357,7 @@ public class PersonnelController : ControllerBase
 
     // 11. YÖNETİCİ İZİN ONAYLAMA (POST /api/personnel/approve-leave/{id})
     [HttpPost("approve-leave/{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ApproveLeave(int id)
     {
         try
@@ -346,11 +383,12 @@ public class PersonnelController : ControllerBase
 
     // 12. YÖNETİCİ İZİN REDDETME (POST /api/personnel/reject-leave/{id})
     [HttpPost("reject-leave/{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> RejectLeave(int id)
     {
         try
         {
-            var leaveRecord = await _context.leaveRecords.FindAsync(id);
+            var leaveRecord = await _context.leaveRecords.FirstOrDefaultAsync(l => l.Id == id);
             if (leaveRecord == null) return NotFound("Reddedilecek izin kaydı bulunamadı.");
 
             leaveRecord.Status = LeaveStatus.Rejected;
@@ -365,6 +403,7 @@ public class PersonnelController : ControllerBase
 
     // 13. BİLDİRİM NOTU GÖNDER (POST /api/personnel/send-notification)
     [HttpPost("send-notification")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> SendLeaveNotification([FromBody] LeaveNotificationRequest request)
     {
         try
@@ -391,7 +430,8 @@ public class PersonnelController : ControllerBase
     {
         try
         {
-            var employee = await _context.employees.FindAsync(request.EmployeeId);
+            var employeeId = IsAdmin ? request.EmployeeId : CurrentEmployeeId;
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == employeeId);
             if (employee == null) return NotFound("Kart okutulan personel bulunamadı.");
 
             string eventType = employee.WorkStatus != (WorkStatusType)1 ? "Giriş Yapıldı 🟢" : "Çıkış Yapıldı 🔴";
@@ -406,46 +446,9 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 15. GİRİŞ YAPMA (POST /api/personnel/login)
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginRequest request)
-    {
-        try
-        {
-            Employee? employee = null;
-            if (request.EmployeeId > 0)
-                employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == request.EmployeeId);
-
-            if (employee == null && !string.IsNullOrWhiteSpace(request.Name))
-                employee = await _context.employees.FirstOrDefaultAsync(e => e.Name.ToLower().Contains(request.Name.Trim().ToLower()));
-
-            if (employee == null)
-                employee = await _context.employees.FirstOrDefaultAsync();
-
-            if (employee == null)
-                return NotFound(new { Message = "Sistemde personel bulunamadı." });
-
-            // 🛡️ ESNEK DEPARTMAN / UNVAN KONTROLÜ (Yönetim, Kurul, İK, IT, CEO vb.)
-            var dept = (employee.Department ?? "").Trim().ToLower();
-            var adminKeywords = new[] { "yönetim", "yonetim", "kurul", "insan kaynakları", "ik", "it", "yönetici", "yonetici", "direktör", "direktor", "ceo" };
-
-            string userRole = adminKeywords.Any(k => dept.Contains(k)) ? "Admin" : "Employee";
-
-            return Ok(new
-            {
-                Success = true,
-                Message = $"🔑 Hoş geldiniz, {employee.Name}!",
-                Employee = new { Id = employee.Id, Name = employee.Name, Department = employee.Department, Role = userRole, WorkStatus = (int)employee.WorkStatus }
-            });
-        }
-        catch (Exception ex)
-        {
-            return StatusCode(500, new { Message = "Giriş işlemi başarısız.", Error = ex.Message });
-        }
-    }
-
-    // 16. EXCEL / CSV PERSONEL YÜKLE (POST /api/personnel/import-csv)
+    // 15. EXCEL / CSV PERSONEL YÜKLE (POST /api/personnel/import-csv)
     [HttpPost("import-csv")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ImportCsv(IFormFile file)
     {
         try
@@ -464,8 +467,9 @@ public class PersonnelController : ControllerBase
                     var p = line.Split(sep);
                     if (p.Length < 8) continue;
 
-                    newEmployees.Add(new Employee
+                    var newEmployee = new Employee
                     {
+                        CompanyId = CompanyId,
                         Name = p[0].Trim(),
                         Department = p[1].Trim(),
                         ExperienceYears = int.TryParse(p[2].Trim(), out int exp) ? exp : 0,
@@ -474,13 +478,24 @@ public class PersonnelController : ControllerBase
                         Gender = p[5].Trim(),
                         MonthlySalary = decimal.TryParse(p[6].Trim(), out decimal sal) ? sal : 40000,
                         WorkStatus = (WorkStatusType)(int.TryParse(p[7].Trim(), out int st) ? st : 1)
-                    });
+                    };
+                    // Geçici şifre; kayıttan sonra gerçek ID belli olunca personelin kendi ID'sine güncellenecek.
+                    newEmployee.PasswordHash = _passwordHasher.HashPassword(newEmployee, "temp");
+                    newEmployees.Add(newEmployee);
                 }
             }
 
             await _context.employees.AddRangeAsync(newEmployees);
             await _context.SaveChangesAsync();
-            return Ok(new { Success = true, Message = $"✅ {newEmployees.Count} personel eklendi." });
+
+            // Varsayılan şifre = personelin kendi ID'si
+            foreach (var emp in newEmployees)
+            {
+                emp.PasswordHash = _passwordHasher.HashPassword(emp, emp.Id.ToString());
+            }
+            await _context.SaveChangesAsync();
+
+            return Ok(new { Success = true, Message = $"✅ {newEmployees.Count} personel eklendi. Varsayılan şifreleri kendi Personel ID'leridir (ilk girişte değiştirmelerini isteyin)." });
         }
         catch (Exception ex)
         {
@@ -488,8 +503,9 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 17. EXCEL İZİN DÖKÜMÜ (GET /api/personnel/export-leaves-csv)
+    // 16. EXCEL İZİN DÖKÜMÜ (GET /api/personnel/export-leaves-csv)
     [HttpGet("export-leaves-csv")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ExportLeavesCsv()
     {
         try
@@ -512,15 +528,19 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 18. AVANS/MASRAF TALEBİ OLUŞTUR (POST /api/personnel/request-advance-expense)
+    // 17. AVANS/MASRAF TALEBİ OLUŞTUR (POST /api/personnel/request-advance-expense)
     [HttpPost("request-advance-expense")]
     public async Task<IActionResult> RequestAdvanceExpense([FromBody] AdvanceExpenseRecord record)
     {
         try
         {
-            var employee = await _context.employees.FindAsync(record.employeeId);
+            if (!IsAdmin)
+                record.employeeId = CurrentEmployeeId;
+
+            var employee = await _context.employees.FirstOrDefaultAsync(e => e.Id == record.employeeId);
             if (employee == null) return NotFound("Personel bulunamadı.");
 
+            record.CompanyId = CompanyId;
             record.Status = RequestStatusType.Pending;
             record.RequestDate = DateTime.Now;
 
@@ -534,8 +554,9 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 19. BEKLEYEN AVANSLAR (GET /api/personnel/pending-advances)
+    // 18. BEKLEYEN AVANSLAR (GET /api/personnel/pending-advances)
     [HttpGet("pending-advances")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> GetPendingAdvances()
     {
         try
@@ -549,13 +570,14 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 20. AVANS ONAYLA (POST /api/personnel/approve-advance/{id})
+    // 19. AVANS ONAYLA (POST /api/personnel/approve-advance/{id})
     [HttpPost("approve-advance/{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ApproveAdvanceExpense(int id)
     {
         try
         {
-            var record = await _context.advanceExpenseRecords.FindAsync(id);
+            var record = await _context.advanceExpenseRecords.FirstOrDefaultAsync(a => a.Id == id);
             if (record == null) return NotFound("Talep bulunamadı.");
 
             record.Status = RequestStatusType.Approved;
@@ -568,13 +590,14 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 21. AVANS REDDET (POST /api/personnel/reject-advance/{id})
+    // 20. AVANS REDDET (POST /api/personnel/reject-advance/{id})
     [HttpPost("reject-advance/{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> RejectAdvanceExpense(int id)
     {
         try
         {
-            var record = await _context.advanceExpenseRecords.FindAsync(id);
+            var record = await _context.advanceExpenseRecords.FirstOrDefaultAsync(a => a.Id == id);
             if (record == null) return NotFound("Talep bulunamadı.");
 
             record.Status = RequestStatusType.Rejected;
@@ -587,7 +610,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 22. DUYURULARI GETİR (GET /api/personnel/announcements)
+    // 21. DUYURULARI GETİR (GET /api/personnel/announcements)
     [HttpGet("announcements")]
     public async Task<IActionResult> GetAnnouncements()
     {
@@ -602,8 +625,9 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 23. DUYURU YAYINLA (POST /api/personnel/announcements)
+    // 22. DUYURU YAYINLA (POST /api/personnel/announcements)
     [HttpPost("announcements")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateAnnouncement([FromBody] Announcement announcement)
     {
         try
@@ -611,6 +635,7 @@ public class PersonnelController : ControllerBase
             if (string.IsNullOrWhiteSpace(announcement.Title) || string.IsNullOrWhiteSpace(announcement.Content))
                 return BadRequest(new { Message = "Duyuru başlığı ve içeriği boş olamaz." });
 
+            announcement.CompanyId = CompanyId;
             announcement.CreatedAt = DateTime.Now;
             announcement.IsActive = true;
 
@@ -625,13 +650,14 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 24. DUYURU SİL (DELETE /api/personnel/announcements/{id})
+    // 23. DUYURU SİL (DELETE /api/personnel/announcements/{id})
     [HttpDelete("announcements/{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteAnnouncement(int id)
     {
         try
         {
-            var item = await _context.announcements.FindAsync(id);
+            var item = await _context.announcements.FirstOrDefaultAsync(a => a.Id == id);
             if (item == null) return NotFound("Duyuru bulunamadı.");
 
             _context.announcements.Remove(item);
@@ -644,7 +670,7 @@ public class PersonnelController : ControllerBase
         }
     }
 
-    // 25. RESMİ BORDRO ZARFI VERİ KAPISI (GET /api/personnel/payslip/{leaveId})
+    // 24. RESMİ BORDRO ZARFI VERİ KAPISI (GET /api/personnel/payslip/{leaveId})
     [HttpGet("payslip/{leaveId}")]
     public async Task<IActionResult> GetPayslipData(int leaveId)
     {
@@ -656,6 +682,9 @@ public class PersonnelController : ControllerBase
 
             if (leave == null || leave.employee == null)
                 return NotFound(new { Message = "Bordro çıkarılacak izin kaydı bulunamadı." });
+
+            if (!IsAdmin && leave.employeeId != CurrentEmployeeId)
+                return Forbid();
 
             var emp = leave.employee;
 

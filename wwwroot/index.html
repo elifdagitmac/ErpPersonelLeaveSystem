@@ -546,6 +546,14 @@
                         <input id="empName" type="text" required maxlength="100" />
                     </div>
                     <div class="form-field">
+                        <label for="empEmail">E-Posta (Giriş için)</label>
+                        <input id="empEmail" type="email" maxlength="150" placeholder="personel@sirket.com" />
+                    </div>
+                    <div class="form-field" id="empPasswordField">
+                        <label for="empPassword">Şifre (boş bırakılırsa Personel ID atanır)</label>
+                        <input id="empPassword" type="password" placeholder="Boş bırakılırsa şifre = Personel ID" autocomplete="new-password" />
+                    </div>
+                    <div class="form-field">
                         <label for="empDepartment">Departman</label>
                         <input id="empDepartment" type="text" required maxlength="100" />
                     </div>
@@ -653,20 +661,21 @@
         <div class="modal glass" style="max-width: 420px; width: 90%; margin: auto;">
             <div class="modal-header">
                 <h3><i class="fa-solid fa-shield-halved"></i> Kurumsal Giriş</h3>
-                <button class="modal-close" id="closeLoginModalBtn" type="button" onclick="document.getElementById('loginModal').style.display='none'">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
             </div>
 
             <form id="loginForm">
                 <div class="form-grid" style="grid-template-columns: 1fr; gap: 15px;">
                     <div class="form-field">
-                        <label for="loginName">Ad Soyad</label>
-                        <input id="loginName" type="text" placeholder="Adınız (boş kalabilir)..." />
+                        <label for="loginCompanyCode">Şirket Kodu</label>
+                        <input id="loginCompanyCode" type="text" placeholder="Örn. APEX" required autocapitalize="characters" />
                     </div>
                     <div class="form-field">
-                        <label for="loginEmpId">Kurum / Personel ID</label>
-                        <input id="loginEmpId" type="number" min="1" placeholder="ID (boş kalırsa 1 sayılır)..." />
+                        <label for="loginEmpId">Personel ID / E-Posta</label>
+                        <input id="loginEmpId" type="text" placeholder="Personel ID veya e-posta adresiniz" required />
+                    </div>
+                    <div class="form-field">
+                        <label for="loginPassword">Şifre</label>
+                        <input id="loginPassword" type="password" placeholder="Şifreniz" required />
                     </div>
                 </div>
 
@@ -677,6 +686,12 @@
                         <i class="fa-solid fa-key"></i> Sisteme Giriş Yap
                     </button>
                 </div>
+
+                <p style="text-align:center; margin-top: 14px;">
+                    <a href="superadmin.html" style="font-size: 0.85rem; color: var(--text-muted);">
+                        <i class="fa-solid fa-crown"></i> Süper Admin misiniz?
+                    </a>
+                </p>
             </form>
         </div>
     </div>

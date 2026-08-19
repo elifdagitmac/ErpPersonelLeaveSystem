@@ -22,6 +22,9 @@ public class AdvanceExpenseRecord
     public int Id { get; set; }
 
     [Required]
+    public int CompanyId { get; set; }
+
+    [Required]
     public int employeeId { get; set; }
 
     [ForeignKey("employeeId")]
